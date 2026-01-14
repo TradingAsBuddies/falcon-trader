@@ -5,8 +5,16 @@ import json
 import threading
 import time
 from datetime import datetime
-from falcon_trader.youtube_strategies import YouTubeStrategyDB, YouTubeStrategyExtractor
 from falcon_core import get_db_manager, FalconConfig
+
+# Optional YouTube strategy support
+try:
+    from falcon_trader.youtube_strategies import YouTubeStrategyDB, YouTubeStrategyExtractor
+    YOUTUBE_AVAILABLE = True
+except ImportError:
+    YouTubeStrategyDB = None
+    YouTubeStrategyExtractor = None
+    YOUTUBE_AVAILABLE = False
 
 try:
     falcon_config = FalconConfig()
@@ -1491,11 +1499,13 @@ def main():
         CLAUDE_API_KEY = sys.argv[2]
 
     # Initialize YouTube strategy extractor if Claude API key is available
-    if CLAUDE_API_KEY:
+    if YOUTUBE_AVAILABLE and CLAUDE_API_KEY:
         print("Initializing YouTube strategy extractor with Claude API...")
         global strategy_extractor
         strategy_extractor = YouTubeStrategyExtractor(CLAUDE_API_KEY)
         print("[OK] Strategy extractor ready")
+    elif not YOUTUBE_AVAILABLE:
+        print("NOTE: YouTube strategy extraction not available (install with: pip install falcon-trader[youtube])")
     else:
         print("WARNING: CLAUDE_API_KEY not set - YouTube strategy extraction disabled")
 
