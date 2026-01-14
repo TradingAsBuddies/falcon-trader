@@ -586,13 +586,15 @@ def list_strategy_versions():
         return jsonify({"error": str(e)}), 500
 
 
-# YouTube Strategies Endpoints
-strategy_db = YouTubeStrategyDB(db_path=DB_PATH)
+# YouTube Strategies Endpoints (optional)
+strategy_db = YouTubeStrategyDB(db_path=DB_PATH) if YOUTUBE_AVAILABLE else None
 strategy_extractor = None  # Will be initialized with Claude API key
 
 @app.route('/api/youtube-strategies', methods=['GET'])
 def get_youtube_strategies():
     """Get all YouTube trading strategies"""
+    if not YOUTUBE_AVAILABLE:
+        return jsonify({"error": "YouTube features not available. Install with: pip install falcon-trader[youtube]"}), 503
     try:
         strategies = strategy_db.get_all_strategies()
         return jsonify({"status": "success", "strategies": strategies})
@@ -602,6 +604,8 @@ def get_youtube_strategies():
 @app.route('/api/youtube-strategies/<int:strategy_id>', methods=['GET'])
 def get_youtube_strategy(strategy_id):
     """Get a specific strategy by ID"""
+    if not YOUTUBE_AVAILABLE:
+        return jsonify({"error": "YouTube features not available. Install with: pip install falcon-trader[youtube]"}), 503
     try:
         strategy = strategy_db.get_strategy_by_id(strategy_id)
         if strategy:
@@ -614,6 +618,8 @@ def get_youtube_strategy(strategy_id):
 @app.route('/api/youtube-strategies/submit', methods=['POST'])
 def submit_youtube_url():
     """Submit a YouTube URL for strategy extraction"""
+    if not YOUTUBE_AVAILABLE:
+        return jsonify({"error": "YouTube features not available. Install with: pip install falcon-trader[youtube]"}), 503
     try:
         data = request.json
         youtube_url = data.get('youtube_url')
@@ -656,6 +662,8 @@ def activate_youtube_strategy(youtube_strategy_id):
         "allocation_pct": 20.0
     }
     """
+    if not YOUTUBE_AVAILABLE:
+        return jsonify({"error": "YouTube features not available. Install with: pip install falcon-trader[youtube]"}), 503
     try:
         from strategy_parser import StrategyCodeGenerator
         from strategy_manager import StrategyManager
