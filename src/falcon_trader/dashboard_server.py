@@ -587,7 +587,7 @@ def list_strategy_versions():
 
 
 # YouTube Strategies Endpoints (optional)
-strategy_db = YouTubeStrategyDB(db_path=DB_PATH) if YOUTUBE_AVAILABLE else None
+strategy_db = YouTubeStrategyDB() if YOUTUBE_AVAILABLE else None
 strategy_extractor = None  # Will be initialized with Claude API key
 
 @app.route('/api/youtube-strategies', methods=['GET'])

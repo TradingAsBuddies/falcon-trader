@@ -4,7 +4,6 @@ YouTube Trading Strategy Collection System
 Extracts trading strategies from YouTube videos using AI analysis
 """
 
-import sqlite3
 import datetime
 import json
 import os
@@ -14,82 +13,44 @@ from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api._errors import TranscriptsDisabled, NoTranscriptFound
 import anthropic
 
+from falcon_core import get_db_manager
+
+
 class YouTubeStrategyDB:
-    """Database manager for YouTube trading strategies"""
+    """Database manager for YouTube trading strategies using falcon_core DatabaseManager"""
 
-    def __init__(self, db_path="paper_trading.db"):
-        self.db_path = db_path
-        self.init_tables()
+    def __init__(self, db_path=None, db_manager=None):
+        """Initialize with optional db_path (legacy) or db_manager"""
+        self.db = db_manager or get_db_manager()
+        print(f"[DB] YouTube strategies using {self.db.db_type} database")
 
-    def init_tables(self):
-        """Initialize YouTube strategies tables"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-
-        # Strategies table
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS youtube_strategies (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                title TEXT NOT NULL,
-                creator TEXT NOT NULL,
-                youtube_url TEXT UNIQUE NOT NULL,
-                video_id TEXT NOT NULL,
-                description TEXT,
-                strategy_overview TEXT,
-                trading_style TEXT,
-                instruments TEXT,
-                entry_rules TEXT,
-                exit_rules TEXT,
-                risk_management TEXT,
-                strategy_code TEXT,
-                tags TEXT,
-                performance_metrics TEXT,
-                pros TEXT,
-                cons TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            )
-        ''')
-
-        # Strategy backtests table
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS strategy_backtests (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                strategy_id INTEGER NOT NULL,
-                ticker TEXT NOT NULL,
-                start_date TEXT,
-                end_date TEXT,
-                total_return REAL,
-                sharpe_ratio REAL,
-                max_drawdown REAL,
-                win_rate REAL,
-                total_trades INTEGER,
-                backtest_data TEXT,
-                created_at TEXT NOT NULL,
-                FOREIGN KEY (strategy_id) REFERENCES youtube_strategies(id)
-            )
-        ''')
-
-        conn.commit()
-        conn.close()
-        print("[DB] YouTube strategies tables initialized")
+    def _parse_json(self, value):
+        """Parse JSON string or return value if already parsed"""
+        if value is None:
+            return []
+        if isinstance(value, (list, dict)):
+            return value
+        try:
+            return json.loads(value) if value else []
+        except (json.JSONDecodeError, TypeError):
+            return []
 
     def add_strategy(self, strategy_data: Dict) -> int:
         """Add a new strategy to the database"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        timestamp = datetime.datetime.now()
+        if self.db.db_type == 'sqlite':
+            timestamp = timestamp.isoformat()
 
-        timestamp = datetime.datetime.now().isoformat()
-
-        cursor.execute('''
+        sql = '''
             INSERT INTO youtube_strategies (
                 title, creator, youtube_url, video_id, description,
                 strategy_overview, trading_style, instruments,
                 entry_rules, exit_rules, risk_management,
                 strategy_code, tags, performance_metrics,
                 pros, cons, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        '''
+        params = (
             strategy_data.get('title', ''),
             strategy_data.get('creator', ''),
             strategy_data.get('youtube_url', ''),
@@ -108,50 +69,47 @@ class YouTubeStrategyDB:
             strategy_data.get('cons', ''),
             timestamp,
             timestamp
-        ))
+        )
 
-        strategy_id = cursor.lastrowid
-        conn.commit()
-        conn.close()
-
-        return strategy_id
+        return self.db.execute(sql, params)
 
     def get_all_strategies(self) -> List[Dict]:
         """Get all strategies from database"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-
-        cursor.execute('SELECT * FROM youtube_strategies ORDER BY created_at DESC')
-        columns = [desc[0] for desc in cursor.description]
-        rows = cursor.fetchall()
+        sql = 'SELECT * FROM youtube_strategies ORDER BY created_at DESC'
+        rows = self.db.execute(sql, fetch='all')
 
         strategies = []
         for row in rows:
-            strategy = dict(zip(columns, row))
-            strategy['tags'] = json.loads(strategy['tags']) if strategy['tags'] else []
-            strategy['performance_metrics'] = json.loads(strategy['performance_metrics']) if strategy['performance_metrics'] else {}
+            strategy = dict(row) if hasattr(row, 'keys') else dict(zip(
+                ['id', 'title', 'creator', 'youtube_url', 'video_id', 'description',
+                 'strategy_overview', 'trading_style', 'instruments', 'entry_rules',
+                 'exit_rules', 'risk_management', 'strategy_code', 'tags',
+                 'performance_metrics', 'pros', 'cons', 'created_at', 'updated_at'],
+                row
+            ))
+            strategy['tags'] = self._parse_json(strategy.get('tags'))
+            strategy['performance_metrics'] = self._parse_json(strategy.get('performance_metrics'))
             strategies.append(strategy)
 
-        conn.close()
         return strategies
 
     def get_strategy_by_id(self, strategy_id: int) -> Optional[Dict]:
         """Get a specific strategy by ID"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-
-        cursor.execute('SELECT * FROM youtube_strategies WHERE id = ?', (strategy_id,))
-        columns = [desc[0] for desc in cursor.description]
-        row = cursor.fetchone()
+        sql = 'SELECT * FROM youtube_strategies WHERE id = %s'
+        row = self.db.execute(sql, (strategy_id,), fetch='one')
 
         if row:
-            strategy = dict(zip(columns, row))
-            strategy['tags'] = json.loads(strategy['tags']) if strategy['tags'] else []
-            strategy['performance_metrics'] = json.loads(strategy['performance_metrics']) if strategy['performance_metrics'] else {}
-            conn.close()
+            strategy = dict(row) if hasattr(row, 'keys') else dict(zip(
+                ['id', 'title', 'creator', 'youtube_url', 'video_id', 'description',
+                 'strategy_overview', 'trading_style', 'instruments', 'entry_rules',
+                 'exit_rules', 'risk_management', 'strategy_code', 'tags',
+                 'performance_metrics', 'pros', 'cons', 'created_at', 'updated_at'],
+                row
+            ))
+            strategy['tags'] = self._parse_json(strategy.get('tags'))
+            strategy['performance_metrics'] = self._parse_json(strategy.get('performance_metrics'))
             return strategy
 
-        conn.close()
         return None
 
 
