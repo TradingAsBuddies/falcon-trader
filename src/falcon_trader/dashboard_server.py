@@ -1476,7 +1476,7 @@ def initialize_bot(massive_api_key, claude_api_key=None, symbols=None, initial_b
         symbols = ["SPY", "QQQ"]
     
     # Import here to avoid circular imports
-    from paper_trading_bot import PaperTradingBot
+    from falcon_trader.paper_trading_bot import PaperTradingBot
     
     bot = PaperTradingBot(
         symbols=symbols,
