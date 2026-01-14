@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trading Strategies | Falcon</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #e4e4e4;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1.5rem 0;
+            border-bottom: 1px solid #333;
+            margin-bottom: 2rem;
+        }
+        h1 {
+            font-size: 2rem;
+            color: #00d4ff;
+        }
+        nav a {
+            margin-left: 1.5rem;
+            color: #00d4ff;
+            text-decoration: none;
+            font-size: 0.9rem;
+        }
+        nav a:hover { text-decoration: underline; }
+
+        .submit-section {
+            background: rgba(255,255,255,0.05);
+            border-radius: 12px;
+            padding: 1.5rem;
+            border: 1px solid #333;
+            margin-bottom: 2rem;
+        }
+        .submit-section h2 {
+            color: #00d4ff;
+            margin-bottom: 1rem;
+            font-size: 1.3rem;
+        }
+        .submit-form {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+        .submit-form input {
+            flex: 1;
+            min-width: 300px;
+            padding: 0.75rem;
+            background: rgba(255,255,255,0.1);
+            border: 1px solid #444;
+            border-radius: 6px;
+            color: #fff;
+            font-size: 0.9rem;
+        }
+        .submit-form button {
+            padding: 0.75rem 1.5rem;
+            background: #00d4ff;
+            color: #1a1a2e;
+            border: none;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .submit-form button:hover { background: #00b8e6; }
+        .submit-form button:disabled {
+            background: #555;
+            cursor: not-allowed;
+        }
+        .status-message {
+            margin-top: 1rem;
+            padding: 0.75rem;
+            border-radius: 6px;
+            display: none;
+        }
+        .status-message.success {
+            background: rgba(107, 203, 119, 0.2);
+            border: 1px solid #6bcb77;
+            color: #6bcb77;
+        }
+        .status-message.error {
+            background: rgba(255, 107, 107, 0.2);
+            border: 1px solid #ff6b6b;
+            color: #ff6b6b;
+        }
+
+        .strategies-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 1.5rem;
+        }
+        .strategy-card {
+            background: rgba(255,255,255,0.05);
+            border-radius: 12px;
+            padding: 1.5rem;
+            border: 1px solid #333;
+            transition: transform 0.2s, border-color 0.2s;
+            cursor: pointer;
+        }
+        .strategy-card:hover {
+            transform: translateY(-2px);
+            border-color: #00d4ff;
+        }
+        .strategy-card h3 {
+            color: #00d4ff;
+            margin-bottom: 0.5rem;
+            font-size: 1.1rem;
+        }
+        .strategy-meta {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 0.75rem;
+            flex-wrap: wrap;
+        }
+        .tag {
+            padding: 0.2rem 0.6rem;
+            background: rgba(0,212,255,0.2);
+            color: #00d4ff;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+        .strategy-card p {
+            color: #aaa;
+            font-size: 0.85rem;
+            line-height: 1.4;
+            margin-bottom: 0.75rem;
+        }
+        .strategy-card .creator {
+            color: #888;
+            font-size: 0.8rem;
+            margin-bottom: 0.5rem;
+        }
+        .loading {
+            text-align: center;
+            padding: 3rem;
+            color: #00d4ff;
+            font-size: 1.1rem;
+        }
+        .no-data {
+            text-align: center;
+            padding: 3rem;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Trading Strategies</h1>
+            <nav>
+                <a href="/">Home</a>
+                <a href="/dashboard">Dashboard</a>
+            </nav>
+        </header>
+
+        <div class="submit-section">
+            <h2>Submit YouTube Strategy</h2>
+            <p style="color: #888; font-size: 0.85rem; margin-bottom: 1rem;">
+                Paste a YouTube URL to automatically extract trading strategies using AI
+            </p>
+            <form class="submit-form" id="submitForm">
+                <input
+                    type="url"
+                    id="youtubeUrl"
+                    placeholder="https://www.youtube.com/watch?v=..."
+                    required
+                >
+                <button type="submit" id="submitBtn">Extract Strategy</button>
+            </form>
+            <div class="status-message" id="statusMessage"></div>
+        </div>
+
+        <div id="strategiesContent">
+            <div class="loading">Loading strategies...</div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '';
+
+        // Load strategies
+        async function loadStrategies() {
+            try {
+                const response = await fetch(`${API_BASE}/api/youtube-strategies`);
+                const data = await response.json();
+
+                const content = document.getElementById('strategiesContent');
+
+                if (data.status === 'success' && data.strategies.length > 0) {
+                    let html = '<div class="strategies-grid">';
+
+                    for (const strategy of data.strategies) {
+                        const tags = Array.isArray(strategy.tags) ? strategy.tags : [];
+                        const tagHtml = tags.slice(0, 3).map(tag => `<span class="tag">${tag}</span>`).join('');
+
+                        html += `
+                            <div class="strategy-card" onclick="viewStrategy(${strategy.id})">
+                                <div class="creator">${strategy.creator || 'Unknown Creator'}</div>
+                                <h3>${strategy.title || 'Untitled Strategy'}</h3>
+                                <div class="strategy-meta">
+                                    ${tagHtml}
+                                </div>
+                                <p>${(strategy.strategy_overview || 'No description available').substring(0, 150)}...</p>
+                                <div style="color: #666; font-size: 0.75rem;">
+                                    ${strategy.trading_style || 'No style specified'}
+                                </div>
+                            </div>
+                        `;
+                    }
+
+                    html += '</div>';
+                    content.innerHTML = html;
+                } else {
+                    content.innerHTML = '<div class="no-data">No strategies found yet. Submit a YouTube URL to get started!</div>';
+                }
+            } catch (error) {
+                document.getElementById('strategiesContent').innerHTML =
+                    `<div class="no-data">Error loading strategies: ${error.message}</div>`;
+            }
+        }
+
+        // Submit YouTube URL
+        document.getElementById('submitForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const url = document.getElementById('youtubeUrl').value;
+            const btn = document.getElementById('submitBtn');
+            const msg = document.getElementById('statusMessage');
+
+            btn.disabled = true;
+            btn.textContent = 'Extracting...';
+            msg.style.display = 'none';
+
+            try {
+                const response = await fetch(`${API_BASE}/api/youtube-strategies/submit`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ youtube_url: url })
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data.status === 'success') {
+                    msg.className = 'status-message success';
+                    msg.textContent = 'Strategy extracted successfully!';
+                    msg.style.display = 'block';
+                    document.getElementById('youtubeUrl').value = '';
+                    setTimeout(() => loadStrategies(), 1000);
+                } else {
+                    msg.className = 'status-message error';
+                    msg.textContent = data.error || 'Failed to extract strategy';
+                    msg.style.display = 'block';
+                }
+            } catch (error) {
+                msg.className = 'status-message error';
+                msg.textContent = `Error: ${error.message}`;
+                msg.style.display = 'block';
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Extract Strategy';
+            }
+        });
+
+        function viewStrategy(id) {
+            window.location.href = `/strategies/${id}.html`;
+        }
+
+        // Load strategies on page load
+        loadStrategies();
+    </script>
+</body>
+</html>

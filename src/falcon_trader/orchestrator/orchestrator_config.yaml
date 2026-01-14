@@ -1,0 +1,101 @@
+# Multi-Strategy Orchestrator Configuration
+
+# Strategy Routing Rules
+routing:
+  penny_stock_threshold: 5.0              # Price below this = penny stock
+  high_volatility_threshold: 0.30         # Annual volatility threshold
+  large_cap_threshold: 100000000000      # Market cap threshold (100B)
+  min_stop_loss_buffer: 0.05             # Minimum 5% buffer
+
+# Strategy Mappings
+strategy_mapping:
+  penny_stocks: "momentum_breakout"
+  etfs: "rsi_mean_reversion"
+  high_volatility: "momentum_breakout"
+  large_cap_stable: "rsi_mean_reversion"
+  default: "rsi_mean_reversion"
+
+# ETF List (use RSI Mean Reversion)
+etf_symbols:
+  - SPY
+  - QQQ
+  - IWM
+  - DIA
+  - XLF
+  - XLE
+  - XLK
+  - VTI
+  - VOO
+
+# Sector-Specific Rules
+sector_routing:
+  Technology: "momentum_breakout"
+  "Consumer Cyclical": "momentum_breakout"
+  Financial: "rsi_mean_reversion"
+  Healthcare: "rsi_mean_reversion"
+  Energy: "bollinger_mean_reversion"
+
+# Strategy Parameters
+strategies:
+  rsi_mean_reversion:
+    enabled: true
+    rsi_period: 14              # RSI calculation period
+    rsi_oversold: 45            # Buy threshold (oversold)
+    rsi_overbought: 55          # Sell threshold (overbought)
+    profit_target: 0.025        # 2.5% profit target
+    max_hold_days: 12           # Maximum holding period
+    position_size_pct: 0.25     # 25% of portfolio per trade
+
+  momentum_breakout:
+    enabled: true
+    breakout_period: 20         # Resistance calculation period
+    volume_multiplier: 1.5      # Volume must be 1.5x average
+    ma_fast: 5                  # Fast moving average
+    ma_slow: 20                 # Slow moving average
+    profit_target: 0.08         # 8% profit target
+    trailing_stop_pct: 0.10     # 10% trailing stop
+    max_hold_days: 20           # Maximum holding period
+    position_size_pct: 0.20     # 20% of portfolio per trade
+
+  bollinger_mean_reversion:
+    enabled: true
+    bb_period: 20               # Bollinger Bands period
+    bb_std: 2.0                 # Standard deviations
+    profit_target: 0.04         # 4% profit target
+    max_hold_days: 15           # Maximum holding period
+    position_size_pct: 0.25     # 25% of portfolio per trade
+    exit_at_middle: true        # Exit at middle band (vs upper)
+
+# Risk Management
+risk_management:
+  max_position_size: 0.95              # Max 95% of cash per trade
+  max_positions: 10                    # Max concurrent positions
+  max_strategy_allocation: 0.50        # Max 50% in one strategy
+  max_sector_exposure: 0.30            # Max 30% in one sector
+
+# Entry Validation
+entry_validation:
+  check_ai_screener: true
+  require_entry_range: true
+  enforce_stop_buffer: true
+  min_confidence: "MEDIUM"
+
+# Execution
+execution:
+  order_type: "market"                 # "market" or "limit"
+  retry_attempts: 3
+  retry_delay_seconds: 5
+  timeout_seconds: 30
+
+# Monitoring
+monitoring:
+  check_interval_seconds: 60           # Check positions every 60s
+  alert_on_drawdown_pct: 0.10         # Alert if position down 10%
+  log_level: "INFO"                    # DEBUG, INFO, WARNING, ERROR
+
+# Data Sources
+data_sources:
+  market_data: "polygon"               # polygon or flatfiles
+  ai_screener: "screened_stocks.json"
+  database: "paper_trading.db"
+  use_yfinance_fallback: true         # Use yfinance if primary fails

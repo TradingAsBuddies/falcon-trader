@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Strategy Details | Falcon</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #e4e4e4;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+        header {
+            padding: 1.5rem 0;
+            border-bottom: 1px solid #333;
+            margin-bottom: 2rem;
+        }
+        nav a {
+            color: #00d4ff;
+            text-decoration: none;
+            margin-right: 1.5rem;
+            font-size: 0.9rem;
+        }
+        nav a:hover { text-decoration: underline; }
+
+        .strategy-header {
+            margin-bottom: 2rem;
+        }
+        .strategy-header h1 {
+            font-size: 2.5rem;
+            color: #00d4ff;
+            margin-bottom: 0.5rem;
+        }
+        .strategy-header .creator {
+            color: #888;
+            font-size: 1rem;
+            margin-bottom: 1rem;
+        }
+        .tag-list {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+            margin-bottom: 1rem;
+        }
+        .tag {
+            padding: 0.3rem 0.8rem;
+            background: rgba(0,212,255,0.2);
+            color: #00d4ff;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+
+        .section {
+            background: rgba(255,255,255,0.05);
+            border-radius: 12px;
+            padding: 1.5rem;
+            border: 1px solid #333;
+            margin-bottom: 1.5rem;
+        }
+        .section h2 {
+            color: #00d4ff;
+            font-size: 1.3rem;
+            margin-bottom: 1rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 1px solid #333;
+        }
+        .section p, .section ul {
+            color: #ccc;
+            line-height: 1.7;
+            font-size: 0.95rem;
+        }
+        .section ul {
+            padding-left: 1.5rem;
+            margin-top: 0.5rem;
+        }
+        .section li {
+            margin-bottom: 0.5rem;
+        }
+
+        .built-for {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+        .built-for-item {
+            padding: 1rem;
+            background: rgba(0,212,255,0.1);
+            border-radius: 8px;
+            border: 1px solid rgba(0,212,255,0.3);
+        }
+        .built-for-item strong {
+            color: #00d4ff;
+            display: block;
+            margin-bottom: 0.3rem;
+            font-size: 0.85rem;
+        }
+
+        .code-block {
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            padding: 1rem;
+            overflow-x: auto;
+            margin-top: 1rem;
+        }
+        .code-block pre {
+            color: #c9d1d9;
+            font-family: 'Courier New', monospace;
+            font-size: 0.85rem;
+            line-height: 1.6;
+        }
+
+        .pros-cons {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+        }
+        .pro {
+            background: rgba(107, 203, 119, 0.1);
+            border: 1px solid rgba(107, 203, 119, 0.3);
+            border-radius: 8px;
+            padding: 1rem;
+        }
+        .con {
+            background: rgba(255, 107, 107, 0.1);
+            border: 1px solid rgba(255, 107, 107, 0.3);
+            border-radius: 8px;
+            padding: 1rem;
+        }
+        .pro h3 {
+            color: #6bcb77;
+            font-size: 1rem;
+            margin-bottom: 0.5rem;
+        }
+        .con h3 {
+            color: #ff6b6b;
+            font-size: 1rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 3rem;
+            color: #00d4ff;
+            font-size: 1.1rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <nav>
+                <a href="/">Home</a>
+                <a href="/strategies.html">All Strategies</a>
+                <a href="/dashboard">Dashboard</a>
+            </nav>
+        </header>
+
+        <div id="content">
+            <div class="loading">Loading strategy...</div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '';
+
+        async function loadStrategy() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const strategyId = urlParams.get('id');
+
+            if (!strategyId) {
+                document.getElementById('content').innerHTML = '<div class="section">Strategy ID not provided</div>';
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/api/youtube-strategies/${strategyId}`);
+                const data = await response.json();
+
+                if (data.status === 'success' && data.strategy) {
+                    renderStrategy(data.strategy);
+                } else {
+                    document.getElementById('content').innerHTML = '<div class="section">Strategy not found</div>';
+                }
+            } catch (error) {
+                document.getElementById('content').innerHTML = `<div class="section">Error: ${error.message}</div>`;
+            }
+        }
+
+        function renderStrategy(s) {
+            const tags = Array.isArray(s.tags) ? s.tags : [];
+            const tagHtml = tags.map(tag => `<span class="tag">${tag}</span>`).join('');
+
+            let html = `
+                <div class="strategy-header">
+                    <h1>${s.title || 'Untitled Strategy'}</h1>
+                    <div class="creator">By ${s.creator || 'Unknown Creator'}</div>
+                    ${tags.length > 0 ? `<div class="tag-list">${tagHtml}</div>` : ''}
+                    ${s.youtube_url ? `<a href="${s.youtube_url}" target="_blank" style="color: #00d4ff; font-size: 0.9rem;">Watch on YouTube →</a>` : ''}
+                </div>
+
+                <div class="section">
+                    <h2>Built For</h2>
+                    <div class="built-for">
+                        <div class="built-for-item">
+                            <strong>Instruments</strong>
+                            ${s.instruments || 'Not specified'}
+                        </div>
+                        <div class="built-for-item">
+                            <strong>Trading Style</strong>
+                            ${s.trading_style || 'Not specified'}
+                        </div>
+                    </div>
+                </div>
+
+                ${s.strategy_overview ? `
+                <div class="section">
+                    <h2>Strategy Overview</h2>
+                    <p>${s.strategy_overview}</p>
+                </div>
+                ` : ''}
+
+                ${s.entry_rules ? `
+                <div class="section">
+                    <h2>Entry Rules</h2>
+                    <p>${s.entry_rules}</p>
+                </div>
+                ` : ''}
+
+                ${s.exit_rules ? `
+                <div class="section">
+                    <h2>Exit Rules</h2>
+                    <p>${s.exit_rules}</p>
+                </div>
+                ` : ''}
+
+                ${s.risk_management ? `
+                <div class="section">
+                    <h2>Risk Management</h2>
+                    <p>${s.risk_management}</p>
+                </div>
+                ` : ''}
+
+                ${s.strategy_code ? `
+                <div class="section">
+                    <h2>Strategy Code</h2>
+                    <div class="code-block">
+                        <pre>${escapeHtml(s.strategy_code)}</pre>
+                    </div>
+                </div>
+                ` : ''}
+
+                ${s.pros || s.cons ? `
+                <div class="section">
+                    <h2>Pros and Cons</h2>
+                    <div class="pros-cons">
+                        <div class="pro">
+                            <h3>Pros</h3>
+                            <p>${s.pros || 'Not specified'}</p>
+                        </div>
+                        <div class="con">
+                            <h3>Cons</h3>
+                            <p>${s.cons || 'Not specified'}</p>
+                        </div>
+                    </div>
+                </div>
+                ` : ''}
+            `;
+
+            document.getElementById('content').innerHTML = html;
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        loadStrategy();
+    </script>
+</body>
+</html>

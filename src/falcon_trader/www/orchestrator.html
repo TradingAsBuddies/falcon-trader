@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Falcon Orchestrator Dashboard</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #e4e4e4;
+            padding: 1rem;
+        }
+        .container { max-width: 1400px; margin: 0 auto; }
+
+        /* Header */
+        header {
+            text-align: center;
+            padding: 2rem 0;
+            border-bottom: 2px solid #00d4ff;
+            margin-bottom: 2rem;
+        }
+        h1 {
+            font-size: 2rem;
+            color: #00d4ff;
+            margin-bottom: 0.5rem;
+            text-shadow: 0 0 10px rgba(0, 212, 255, 0.3);
+        }
+        .subtitle { color: #888; font-size: 0.9rem; }
+        .status-badge {
+            display: inline-block;
+            padding: 0.3rem 0.8rem;
+            background: rgba(0, 255, 0, 0.2);
+            border: 1px solid #0f0;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            margin-top: 0.5rem;
+        }
+        .status-badge.active { color: #0f0; }
+
+        /* Grid Layout */
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        /* Cards */
+        .card {
+            background: rgba(255,255,255,0.05);
+            border-radius: 12px;
+            padding: 1.5rem;
+            border: 1px solid #333;
+            backdrop-filter: blur(10px);
+        }
+        .card h2 {
+            color: #00d4ff;
+            margin-bottom: 1rem;
+            font-size: 1.3rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .card-icon { font-size: 1.5rem; }
+
+        /* Account Summary */
+        .metric {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.7rem 0;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        .metric:last-child { border-bottom: none; }
+        .metric-label { color: #999; font-size: 0.9rem; }
+        .metric-value {
+            color: #fff;
+            font-weight: 600;
+            font-size: 1.1rem;
+        }
+        .metric-value.positive { color: #0f0; }
+        .metric-value.negative { color: #f44; }
+
+        /* Positions Table */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+        th {
+            background: rgba(0, 212, 255, 0.1);
+            color: #00d4ff;
+            padding: 0.8rem;
+            text-align: left;
+            font-size: 0.85rem;
+            font-weight: 600;
+            border-bottom: 2px solid #00d4ff;
+        }
+        td {
+            padding: 0.8rem;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            font-size: 0.9rem;
+        }
+        tr:hover { background: rgba(0, 212, 255, 0.05); }
+        .ticker {
+            font-weight: 700;
+            color: #00d4ff;
+            font-size: 1rem;
+        }
+        .pnl-positive { color: #0f0; font-weight: 600; }
+        .pnl-negative { color: #f44; font-weight: 600; }
+        .pnl-neutral { color: #999; }
+
+        /* Recent Orders */
+        .order-item {
+            padding: 0.8rem;
+            background: rgba(255,255,255,0.03);
+            border-radius: 8px;
+            margin-bottom: 0.8rem;
+            border-left: 3px solid #00d4ff;
+        }
+        .order-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 0.5rem;
+        }
+        .order-symbol {
+            font-weight: 700;
+            color: #00d4ff;
+            font-size: 1.1rem;
+        }
+        .order-type {
+            padding: 0.2rem 0.6rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+        .order-type.buy { background: rgba(0, 255, 0, 0.2); color: #0f0; }
+        .order-type.sell { background: rgba(255, 0, 0, 0.2); color: #f44; }
+        .order-details {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 0.5rem;
+            font-size: 0.85rem;
+            color: #999;
+        }
+        .order-detail-item { }
+        .order-detail-label { color: #666; font-size: 0.75rem; }
+        .order-detail-value { color: #fff; font-weight: 600; }
+
+        /* AI Recommendations */
+        .recommendation {
+            padding: 1rem;
+            background: rgba(0, 212, 255, 0.05);
+            border-radius: 8px;
+            margin-bottom: 1rem;
+            border: 1px solid rgba(0, 212, 255, 0.2);
+        }
+        .rec-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.5rem;
+        }
+        .rec-ticker {
+            font-weight: 700;
+            color: #00d4ff;
+            font-size: 1.2rem;
+        }
+        .confidence-badge {
+            padding: 0.3rem 0.7rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+        .conf-high { background: rgba(0, 255, 0, 0.2); color: #0f0; }
+        .conf-med { background: rgba(255, 165, 0, 0.2); color: #fa0; }
+        .conf-low { background: rgba(255, 0, 0, 0.2); color: #f44; }
+        .rec-details {
+            font-size: 0.85rem;
+            color: #ccc;
+            line-height: 1.5;
+        }
+        .rec-prices {
+            display: flex;
+            gap: 1rem;
+            margin-top: 0.5rem;
+            font-size: 0.85rem;
+        }
+        .price-item { color: #999; }
+        .price-value { color: #fff; font-weight: 600; }
+
+        /* Refresh Button */
+        .refresh-btn {
+            background: #00d4ff;
+            color: #1a1a2e;
+            border: none;
+            padding: 0.5rem 1.2rem;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.9rem;
+            transition: all 0.2s;
+        }
+        .refresh-btn:hover {
+            background: #00b8e6;
+            transform: translateY(-1px);
+        }
+
+        /* Loading */
+        .loading {
+            text-align: center;
+            padding: 2rem;
+            color: #666;
+        }
+
+        /* Timestamp */
+        .timestamp {
+            text-align: center;
+            color: #666;
+            font-size: 0.8rem;
+            margin-top: 2rem;
+        }
+
+        /* Nav */
+        .nav {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+            margin-bottom: 1rem;
+        }
+        .nav a {
+            color: #00d4ff;
+            text-decoration: none;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            transition: all 0.2s;
+        }
+        .nav a:hover {
+            background: rgba(0, 212, 255, 0.1);
+        }
+        .nav a.active {
+            background: rgba(0, 212, 255, 0.2);
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🚀 Falcon Multi-Strategy Orchestrator</h1>
+            <p class="subtitle">AI-Powered Automated Trading System</p>
+            <span class="status-badge active" id="systemStatus">● ACTIVE</span>
+        </header>
+
+        <div class="nav">
+            <a href="/" class="active">Orchestrator</a>
+            <a href="/strategies.html">Strategies</a>
+        </div>
+
+        <!-- Account Summary -->
+        <div class="grid">
+            <div class="card">
+                <h2><span class="card-icon">💰</span> Account Summary</h2>
+                <div id="accountSummary">
+                    <div class="loading">Loading...</div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2><span class="card-icon">📊</span> Portfolio Performance</h2>
+                <div id="portfolioPerformance">
+                    <div class="loading">Loading...</div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2><span class="card-icon">⚙️</span> Active Strategies</h2>
+                <div id="activeStrategies">
+                    <div class="metric">
+                        <span class="metric-label">RSI Mean Reversion</span>
+                        <span class="metric-value" style="color: #0f0;">ACTIVE</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Momentum Breakout</span>
+                        <span class="metric-value" style="color: #0f0;">ACTIVE</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Bollinger Bands</span>
+                        <span class="metric-value" style="color: #0f0;">ACTIVE</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Open Positions -->
+        <div class="card">
+            <h2>
+                <span class="card-icon">📈</span>
+                Open Positions
+                <button class="refresh-btn" onclick="loadAllData()" style="margin-left: auto; font-size: 0.8rem;">🔄 Refresh</button>
+            </h2>
+            <div id="positionsTable">
+                <div class="loading">Loading positions...</div>
+            </div>
+        </div>
+
+        <!-- Recent Orders -->
+        <div class="card">
+            <h2><span class="card-icon">📝</span> Recent Orders</h2>
+            <div id="recentOrders">
+                <div class="loading">Loading orders...</div>
+            </div>
+        </div>
+
+        <!-- AI Recommendations -->
+        <div class="card">
+            <h2><span class="card-icon">🤖</span> AI Stock Recommendations</h2>
+            <div id="aiRecommendations">
+                <div class="loading">Loading recommendations...</div>
+            </div>
+        </div>
+
+        <div class="timestamp" id="lastUpdate"></div>
+    </div>
+
+    <script>
+        // Load account summary
+        async function loadAccount() {
+            try {
+                const response = await fetch('/api/account');
+                const data = await response.json();
+
+                const pnl = data.totalValue - data.initialBalance;
+                const pnlPct = (pnl / data.initialBalance) * 100;
+                const pnlClass = pnl >= 0 ? 'positive' : 'negative';
+
+                document.getElementById('accountSummary').innerHTML = `
+                    <div class="metric">
+                        <span class="metric-label">Total Value</span>
+                        <span class="metric-value">$${data.totalValue.toFixed(2)}</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Cash Available</span>
+                        <span class="metric-value">$${data.cash.toFixed(2)}</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Positions Value</span>
+                        <span class="metric-value">$${data.positionsValue.toFixed(2)}</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Total P&L</span>
+                        <span class="metric-value ${pnlClass}">$${pnl.toFixed(2)} (${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%)</span>
+                    </div>
+                `;
+
+                const buyingPower = (data.positionsValue / data.totalValue) * 100;
+                document.getElementById('portfolioPerformance').innerHTML = `
+                    <div class="metric">
+                        <span class="metric-label">Initial Balance</span>
+                        <span class="metric-value">$${data.initialBalance.toFixed(2)}</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Buying Power Used</span>
+                        <span class="metric-value">${buyingPower.toFixed(1)}%</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Cash Reserve</span>
+                        <span class="metric-value">${(100 - buyingPower).toFixed(1)}%</span>
+                    </div>
+                `;
+            } catch (error) {
+                console.error('Error loading account:', error);
+            }
+        }
+
+        // Load positions
+        async function loadPositions() {
+            try {
+                const response = await fetch('/api/positions');
+                const positions = await response.json();
+
+                if (positions.length === 0) {
+                    document.getElementById('positionsTable').innerHTML = '<p style="text-align:center; color:#666; padding:2rem;">No open positions</p>';
+                    return;
+                }
+
+                let html = `
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Symbol</th>
+                                <th>Quantity</th>
+                                <th>Entry Price</th>
+                                <th>Current Price</th>
+                                <th>Value</th>
+                                <th>P&L</th>
+                                <th>Stop Loss</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                `;
+
+                for (const pos of positions) {
+                    const value = pos.quantity * pos.currentPrice;
+                    const pnl = ((pos.currentPrice - pos.avgPrice) / pos.avgPrice) * 100;
+                    const pnlClass = pnl > 0 ? 'pnl-positive' : pnl < 0 ? 'pnl-negative' : 'pnl-neutral';
+
+                    html += `
+                        <tr>
+                            <td class="ticker">${pos.symbol}</td>
+                            <td>${pos.quantity.toFixed(0)}</td>
+                            <td>$${pos.avgPrice.toFixed(2)}</td>
+                            <td>$${pos.currentPrice.toFixed(2)}</td>
+                            <td>$${value.toFixed(2)}</td>
+                            <td class="${pnlClass}">${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}%</td>
+                            <td>$${pos.stopLoss.toFixed(2)}</td>
+                        </tr>
+                    `;
+                }
+
+                html += '</tbody></table>';
+                document.getElementById('positionsTable').innerHTML = html;
+            } catch (error) {
+                console.error('Error loading positions:', error);
+            }
+        }
+
+        // Load recent orders
+        async function loadOrders() {
+            try {
+                const response = await fetch('/api/trades');
+                const orders = await response.json();
+
+                if (orders.length === 0) {
+                    document.getElementById('recentOrders').innerHTML = '<p style="text-align:center; color:#666; padding:2rem;">No orders yet</p>';
+                    return;
+                }
+
+                let html = '';
+                orders.slice(0, 10).forEach(order => {
+                    const date = new Date(order.timestamp);
+                    const orderType = order.side.toLowerCase();
+
+                    html += `
+                        <div class="order-item">
+                            <div class="order-header">
+                                <span class="order-symbol">${order.symbol}</span>
+                                <span class="order-type ${orderType}">${order.side}</span>
+                            </div>
+                            <div class="order-details">
+                                <div class="order-detail-item">
+                                    <div class="order-detail-label">Quantity</div>
+                                    <div class="order-detail-value">${order.quantity.toFixed(0)} shares</div>
+                                </div>
+                                <div class="order-detail-item">
+                                    <div class="order-detail-label">Price</div>
+                                    <div class="order-detail-value">$${order.price.toFixed(2)}</div>
+                                </div>
+                                <div class="order-detail-item">
+                                    <div class="order-detail-label">Time</div>
+                                    <div class="order-detail-value">${date.toLocaleString()}</div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
+
+                document.getElementById('recentOrders').innerHTML = html;
+            } catch (error) {
+                console.error('Error loading orders:', error);
+            }
+        }
+
+        // Load AI recommendations
+        async function loadRecommendations() {
+            try {
+                const response = await fetch('/api/recommendations');
+                const data = await response.json();
+
+                if (data.status !== 'success' || data.recommendations.length === 0) {
+                    document.getElementById('aiRecommendations').innerHTML = '<p style="text-align:center; color:#666; padding:2rem;">No recommendations available</p>';
+                    return;
+                }
+
+                let html = '';
+                data.recommendations.slice(0, 5).forEach(rec => {
+                    const confScore = rec.confidence_score;
+                    const confClass = confScore >= 7 ? 'conf-high' : confScore >= 5 ? 'conf-med' : 'conf-low';
+                    const confLabel = confScore >= 7 ? 'HIGH' : confScore >= 5 ? 'MED' : 'LOW';
+
+                    html += `
+                        <div class="recommendation">
+                            <div class="rec-header">
+                                <span class="rec-ticker">${rec.ticker}</span>
+                                <span class="confidence-badge ${confClass}">${confLabel} (${confScore}/10)</span>
+                            </div>
+                            <div class="rec-details">${rec.reasoning}</div>
+                            <div class="rec-prices">
+                                <div class="price-item">
+                                    Entry: <span class="price-value">${rec.entry_price_range}</span>
+                                </div>
+                                <div class="price-item">
+                                    Target: <span class="price-value">$${rec.target_price}</span>
+                                </div>
+                                <div class="price-item">
+                                    Stop: <span class="price-value">$${rec.stop_loss}</span>
+                                </div>
+                                <div class="price-item">
+                                    Risk: <span class="price-value">${rec.risk_level}</span>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
+
+                document.getElementById('aiRecommendations').innerHTML = html;
+            } catch (error) {
+                console.error('Error loading recommendations:', error);
+            }
+        }
+
+        // Load all data
+        function loadAllData() {
+            loadAccount();
+            loadPositions();
+            loadOrders();
+            loadRecommendations();
+            document.getElementById('lastUpdate').textContent = `Last updated: ${new Date().toLocaleString()}`;
+        }
+
+        // Initial load
+        loadAllData();
+
+        // Auto-refresh every 30 seconds
+        setInterval(loadAllData, 30000);
+    </script>
+</body>
+</html>

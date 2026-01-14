@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Falcon Analytics</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #e4e4e4;
+            padding: 1rem;
+        }
+        .container { max-width: 1600px; margin: 0 auto; }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem 0;
+            border-bottom: 1px solid #333;
+            margin-bottom: 1.5rem;
+        }
+        h1 { color: #00d4ff; font-size: 1.8rem; }
+        .nav-links a {
+            color: #00d4ff;
+            text-decoration: none;
+            margin-left: 1.5rem;
+            font-size: 0.9rem;
+        }
+        .nav-links a:hover { text-decoration: underline; }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(6, 1fr);
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        .stat-card {
+            background: rgba(255,255,255,0.05);
+            border-radius: 8px;
+            padding: 1rem;
+            border: 1px solid #333;
+        }
+        .stat-card h3 {
+            color: #888;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            margin-bottom: 0.3rem;
+        }
+        .stat-card .value {
+            font-size: 1.4rem;
+            color: #fff;
+            font-weight: 600;
+        }
+        .positive { color: #6bcb77 !important; }
+        .negative { color: #ff6b6b !important; }
+
+        /* Chart Panels */
+        .charts-row {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+        .charts-row.equal {
+            grid-template-columns: 1fr 1fr;
+        }
+
+        .panel {
+            background: rgba(255,255,255,0.05);
+            border-radius: 8px;
+            padding: 1.25rem;
+            border: 1px solid #333;
+        }
+        .panel h2 {
+            color: #00d4ff;
+            font-size: 1rem;
+            margin-bottom: 1rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .panel-controls {
+            display: flex;
+            gap: 0.5rem;
+        }
+        .panel-controls button {
+            background: transparent;
+            border: 1px solid #444;
+            color: #888;
+            padding: 0.25rem 0.75rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            cursor: pointer;
+        }
+        .panel-controls button.active {
+            background: #00d4ff;
+            color: #1a1a2e;
+            border-color: #00d4ff;
+        }
+        .panel-controls button:hover:not(.active) {
+            border-color: #00d4ff;
+            color: #00d4ff;
+        }
+
+        .chart-container {
+            position: relative;
+            height: 300px;
+        }
+        .chart-container.tall {
+            height: 400px;
+        }
+
+        /* Strategy Table */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            padding: 0.6rem;
+            text-align: left;
+            border-bottom: 1px solid #333;
+            font-size: 0.85rem;
+        }
+        th {
+            color: #888;
+            font-weight: 600;
+        }
+        td { color: #e4e4e4; }
+        .strategy-name { font-weight: 600; color: #00d4ff; }
+
+        /* Loading & Error */
+        .loading {
+            text-align: center;
+            padding: 3rem;
+            color: #888;
+        }
+        .error { color: #ff6b6b; }
+
+        /* Responsive */
+        @media (max-width: 1200px) {
+            .stats-grid { grid-template-columns: repeat(3, 1fr); }
+            .charts-row { grid-template-columns: 1fr; }
+        }
+        @media (max-width: 768px) {
+            .stats-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Analytics Dashboard</h1>
+            <nav class="nav-links">
+                <a href="/">Home</a>
+                <a href="/dashboard">Trading</a>
+                <a href="/strategies.html">Strategies</a>
+                <a href="/orchestrator.html">Orchestrator</a>
+            </nav>
+        </header>
+
+        <!-- Stats Overview -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <h3>Total Value</h3>
+                <div class="value" id="totalValue">$--</div>
+            </div>
+            <div class="stat-card">
+                <h3>Total P&L</h3>
+                <div class="value" id="totalPnL">$--</div>
+            </div>
+            <div class="stat-card">
+                <h3>Win Rate</h3>
+                <div class="value" id="winRate">--%</div>
+            </div>
+            <div class="stat-card">
+                <h3>Total Trades</h3>
+                <div class="value" id="totalTrades">--</div>
+            </div>
+            <div class="stat-card">
+                <h3>Best Trade</h3>
+                <div class="value positive" id="bestTrade">$--</div>
+            </div>
+            <div class="stat-card">
+                <h3>Worst Trade</h3>
+                <div class="value negative" id="worstTrade">$--</div>
+            </div>
+        </div>
+
+        <!-- Equity Curve -->
+        <div class="charts-row">
+            <div class="panel">
+                <h2>
+                    Equity Curve
+                    <div class="panel-controls">
+                        <button class="active" data-interval="hour" onclick="changeEquityInterval('hour')">Hourly</button>
+                        <button data-interval="day" onclick="changeEquityInterval('day')">Daily</button>
+                    </div>
+                </h2>
+                <div class="chart-container tall">
+                    <canvas id="equityChart"></canvas>
+                </div>
+            </div>
+            <div class="panel">
+                <h2>Daily P&L</h2>
+                <div class="chart-container tall">
+                    <canvas id="pnlChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Strategy Comparison -->
+        <div class="charts-row equal">
+            <div class="panel">
+                <h2>Strategy Performance</h2>
+                <div class="chart-container">
+                    <canvas id="strategyChart"></canvas>
+                </div>
+            </div>
+            <div class="panel">
+                <h2>Strategy Metrics</h2>
+                <div style="overflow-x: auto;">
+                    <table id="strategyTable">
+                        <thead>
+                            <tr>
+                                <th>Strategy</th>
+                                <th>Trades</th>
+                                <th>Win Rate</th>
+                                <th>Return</th>
+                                <th>Sharpe</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr><td colspan="5" class="loading">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Trade Distribution -->
+        <div class="charts-row equal">
+            <div class="panel">
+                <h2>Win/Loss Distribution</h2>
+                <div class="chart-container">
+                    <canvas id="winLossChart"></canvas>
+                </div>
+            </div>
+            <div class="panel">
+                <h2>Trade P&L Histogram</h2>
+                <div class="chart-container">
+                    <canvas id="histogramChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Chart.js defaults
+        Chart.defaults.color = '#888';
+        Chart.defaults.borderColor = '#333';
+
+        let equityChart, pnlChart, strategyChart, winLossChart, histogramChart;
+        let currentInterval = 'hour';
+
+        // Initialize charts
+        async function initCharts() {
+            await Promise.all([
+                loadEquityChart(),
+                loadPnLChart(),
+                loadStrategyComparison(),
+                loadTradeDistribution(),
+                loadStats()
+            ]);
+        }
+
+        // Load stats
+        async function loadStats() {
+            try {
+                const response = await fetch('/api/trades/summary');
+                const data = await response.json();
+
+                document.getElementById('totalTrades').textContent = data.totalTrades || 0;
+                document.getElementById('winRate').textContent = `${((data.winRate || 0) * 100).toFixed(1)}%`;
+
+                const pnl = data.totalPnL || 0;
+                const pnlEl = document.getElementById('totalPnL');
+                pnlEl.textContent = `$${pnl.toFixed(2)}`;
+                pnlEl.className = `value ${pnl >= 0 ? 'positive' : 'negative'}`;
+
+                document.getElementById('bestTrade').textContent = `$${(data.bestTrade || 0).toFixed(2)}`;
+                document.getElementById('worstTrade').textContent = `$${(data.worstTrade || 0).toFixed(2)}`;
+
+                // Get account value
+                const accResponse = await fetch('/api/account');
+                const accData = await accResponse.json();
+                if (accData.totalValue) {
+                    document.getElementById('totalValue').textContent = `$${accData.totalValue.toFixed(2)}`;
+                }
+            } catch (e) {
+                console.error('Error loading stats:', e);
+            }
+        }
+
+        // Equity Chart
+        async function loadEquityChart(interval = 'hour') {
+            try {
+                const response = await fetch(`/api/charts/equity?interval=${interval}&limit=200`);
+                const data = await response.json();
+
+                if (data.status !== 'success') throw new Error(data.error);
+
+                const labels = data.data.map(d => d.timestamp);
+                const values = data.data.map(d => d.totalValue);
+                const cash = data.data.map(d => d.cash);
+
+                if (equityChart) equityChart.destroy();
+
+                equityChart = new Chart(document.getElementById('equityChart'), {
+                    type: 'line',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Total Value',
+                            data: values,
+                            borderColor: '#00d4ff',
+                            backgroundColor: 'rgba(0, 212, 255, 0.1)',
+                            fill: true,
+                            tension: 0.3,
+                            pointRadius: 0
+                        }, {
+                            label: 'Cash',
+                            data: cash,
+                            borderColor: '#6bcb77',
+                            backgroundColor: 'transparent',
+                            borderDash: [5, 5],
+                            tension: 0.3,
+                            pointRadius: 0
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { position: 'top' }
+                        },
+                        scales: {
+                            x: {
+                                display: true,
+                                ticks: { maxTicksLimit: 10 }
+                            },
+                            y: {
+                                display: true,
+                                ticks: {
+                                    callback: v => '$' + v.toFixed(0)
+                                }
+                            }
+                        }
+                    }
+                });
+            } catch (e) {
+                console.error('Error loading equity chart:', e);
+            }
+        }
+
+        function changeEquityInterval(interval) {
+            currentInterval = interval;
+            document.querySelectorAll('.panel-controls button').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.interval === interval);
+            });
+            loadEquityChart(interval);
+        }
+
+        // P&L Chart
+        async function loadPnLChart() {
+            try {
+                const response = await fetch('/api/charts/pnl');
+                const data = await response.json();
+
+                if (data.status !== 'success') throw new Error(data.error);
+
+                const labels = data.data.map(d => d.date);
+                const dailyPnL = data.data.map(d => d.dailyPnL);
+                const cumulative = data.data.map(d => d.cumulativePnL);
+
+                if (pnlChart) pnlChart.destroy();
+
+                pnlChart = new Chart(document.getElementById('pnlChart'), {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Daily P&L',
+                            data: dailyPnL,
+                            backgroundColor: dailyPnL.map(v => v >= 0 ? 'rgba(107, 203, 119, 0.7)' : 'rgba(255, 107, 107, 0.7)'),
+                            borderRadius: 4
+                        }, {
+                            label: 'Cumulative',
+                            data: cumulative,
+                            type: 'line',
+                            borderColor: '#00d4ff',
+                            backgroundColor: 'transparent',
+                            tension: 0.3,
+                            pointRadius: 3,
+                            yAxisID: 'y1'
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { position: 'top' }
+                        },
+                        scales: {
+                            y: {
+                                position: 'left',
+                                ticks: { callback: v => '$' + v.toFixed(0) }
+                            },
+                            y1: {
+                                position: 'right',
+                                grid: { drawOnChartArea: false },
+                                ticks: { callback: v => '$' + v.toFixed(0) }
+                            }
+                        }
+                    }
+                });
+            } catch (e) {
+                console.error('Error loading P&L chart:', e);
+            }
+        }
+
+        // Strategy Comparison
+        async function loadStrategyComparison() {
+            try {
+                const response = await fetch('/api/charts/strategy-comparison');
+                const data = await response.json();
+
+                if (data.status !== 'success') throw new Error(data.error);
+
+                const strategies = data.strategies;
+
+                // Update table
+                const tbody = document.querySelector('#strategyTable tbody');
+                if (strategies.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#888;">No strategy data yet</td></tr>';
+                } else {
+                    tbody.innerHTML = strategies.map(s => `
+                        <tr>
+                            <td class="strategy-name">${s.strategy}</td>
+                            <td>${s.totalTrades}</td>
+                            <td class="${s.winRate >= 0.5 ? 'positive' : 'negative'}">${(s.winRate * 100).toFixed(1)}%</td>
+                            <td class="${s.totalReturn >= 0 ? 'positive' : 'negative'}">${(s.totalReturn * 100).toFixed(2)}%</td>
+                            <td>${s.sharpeRatio?.toFixed(2) || '-'}</td>
+                        </tr>
+                    `).join('');
+                }
+
+                // Strategy chart
+                if (strategyChart) strategyChart.destroy();
+
+                if (strategies.length > 0) {
+                    strategyChart = new Chart(document.getElementById('strategyChart'), {
+                        type: 'radar',
+                        data: {
+                            labels: ['Win Rate', 'Return', 'Trades', 'Sharpe', 'Avg Profit'],
+                            datasets: strategies.slice(0, 5).map((s, i) => ({
+                                label: s.strategy,
+                                data: [
+                                    s.winRate * 100,
+                                    Math.min(Math.max(s.totalReturn * 100, -50), 50),
+                                    Math.min(s.totalTrades, 100),
+                                    Math.min(Math.max((s.sharpeRatio || 0) * 20, -50), 50),
+                                    Math.min(Math.max(s.avgProfit, -50), 50)
+                                ],
+                                borderColor: ['#00d4ff', '#6bcb77', '#ffd93d', '#ff6b6b', '#9b59b6'][i],
+                                backgroundColor: ['rgba(0,212,255,0.1)', 'rgba(107,203,119,0.1)', 'rgba(255,217,61,0.1)', 'rgba(255,107,107,0.1)', 'rgba(155,89,182,0.1)'][i]
+                            }))
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: { legend: { position: 'bottom' } },
+                            scales: {
+                                r: {
+                                    beginAtZero: true,
+                                    grid: { color: '#333' },
+                                    angleLines: { color: '#333' }
+                                }
+                            }
+                        }
+                    });
+                }
+            } catch (e) {
+                console.error('Error loading strategy comparison:', e);
+            }
+        }
+
+        // Trade Distribution
+        async function loadTradeDistribution() {
+            try {
+                const response = await fetch('/api/charts/trade-distribution');
+                const data = await response.json();
+
+                if (data.status !== 'success') throw new Error(data.error);
+
+                const summary = data.summary;
+                const trades = data.trades;
+
+                // Win/Loss pie chart
+                if (winLossChart) winLossChart.destroy();
+
+                winLossChart = new Chart(document.getElementById('winLossChart'), {
+                    type: 'doughnut',
+                    data: {
+                        labels: ['Profitable', 'Losing'],
+                        datasets: [{
+                            data: [summary.profitable || 0, (summary.total || 0) - (summary.profitable || 0)],
+                            backgroundColor: ['#6bcb77', '#ff6b6b'],
+                            borderWidth: 0
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { position: 'bottom' }
+                        },
+                        cutout: '60%'
+                    }
+                });
+
+                // Histogram
+                if (histogramChart) histogramChart.destroy();
+
+                // Create histogram bins
+                const pnlValues = trades.map(t => t.pnl).filter(p => p !== 0);
+                if (pnlValues.length > 0) {
+                    const bins = {};
+                    const binSize = 10;
+                    pnlValues.forEach(pnl => {
+                        const bin = Math.floor(pnl / binSize) * binSize;
+                        bins[bin] = (bins[bin] || 0) + 1;
+                    });
+
+                    const sortedBins = Object.keys(bins).map(Number).sort((a, b) => a - b);
+                    const binLabels = sortedBins.map(b => `$${b}`);
+                    const binValues = sortedBins.map(b => bins[b]);
+                    const binColors = sortedBins.map(b => b >= 0 ? 'rgba(107, 203, 119, 0.7)' : 'rgba(255, 107, 107, 0.7)');
+
+                    histogramChart = new Chart(document.getElementById('histogramChart'), {
+                        type: 'bar',
+                        data: {
+                            labels: binLabels,
+                            datasets: [{
+                                label: 'Trade Count',
+                                data: binValues,
+                                backgroundColor: binColors,
+                                borderRadius: 4
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                legend: { display: false }
+                            },
+                            scales: {
+                                y: { beginAtZero: true }
+                            }
+                        }
+                    });
+                }
+            } catch (e) {
+                console.error('Error loading trade distribution:', e);
+            }
+        }
+
+        // Initialize on load
+        initCharts();
+
+        // Auto-refresh every 60 seconds
+        setInterval(() => {
+            loadStats();
+            loadEquityChart(currentInterval);
+        }, 60000);
+    </script>
+</body>
+</html>
