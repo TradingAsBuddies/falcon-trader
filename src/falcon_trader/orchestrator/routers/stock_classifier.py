@@ -3,9 +3,7 @@ Stock classification for strategy routing
 """
 import sys
 import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-
-from orchestrator.utils.data_structures import StockProfile
+from falcon_trader.orchestrator.utils.data_structures import StockProfile
 
 
 class StockClassifier:

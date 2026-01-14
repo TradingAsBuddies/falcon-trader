@@ -8,9 +8,9 @@ import sys
 import yaml
 import time
 from datetime import datetime
-from orchestrator.execution.trade_executor import TradeExecutor
-from orchestrator.monitors.performance_tracker import PerformanceTracker
-from db_manager import DatabaseManager
+from falcon_trader.orchestrator.execution.trade_executor import TradeExecutor
+from falcon_trader.orchestrator.monitors.performance_tracker import PerformanceTracker
+from falcon_core import DatabaseManager
 
 try:
     from dotenv import load_dotenv

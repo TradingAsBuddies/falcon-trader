@@ -4,10 +4,8 @@ Strategy routing logic
 import sys
 import os
 from datetime import datetime
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-
-from orchestrator.routers.stock_classifier import StockClassifier
-from orchestrator.utils.data_structures import RoutingDecision, StockProfile
+from falcon_trader.orchestrator.routers.stock_classifier import StockClassifier
+from falcon_trader.orchestrator.utils.data_structures import RoutingDecision, StockProfile
 
 
 class StrategyRouter:

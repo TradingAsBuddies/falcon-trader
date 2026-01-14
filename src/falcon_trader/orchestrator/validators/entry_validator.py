@@ -6,9 +6,7 @@ import os
 import json
 from datetime import datetime, timedelta
 from typing import Optional, Dict
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-
-from orchestrator.utils.data_structures import ValidationResult
+from falcon_trader.orchestrator.utils.data_structures import ValidationResult
 
 
 class EntryValidator:
@@ -67,7 +65,7 @@ class EntryValidator:
         Returns:
             Dict with recommendation data or None if not found
         """
-        from orchestrator.validators.screener_parser import ScreenerParser
+        from falcon_trader.orchestrator.validators.screener_parser import ScreenerParser
 
         if not self.load_screener_data():
             return None

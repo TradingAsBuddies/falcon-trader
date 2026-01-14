@@ -13,10 +13,8 @@ from datetime import datetime
 from typing import Optional, Dict, List
 from dataclasses import dataclass
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-
-from db_manager import DatabaseManager
-from orchestrator.utils.data_structures import Position
+from falcon_core import DatabaseManager
+from falcon_trader.orchestrator.utils.data_structures import Position
 
 
 @dataclass

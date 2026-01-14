@@ -5,13 +5,12 @@ import json
 import threading
 import time
 from datetime import datetime
-from youtube_strategies import YouTubeStrategyDB, YouTubeStrategyExtractor
-from db_manager import get_db_manager
+from falcon_trader.youtube_strategies import YouTubeStrategyDB, YouTubeStrategyExtractor
+from falcon_core import get_db_manager, FalconConfig
 
 try:
-    from config import FalconConfig
     falcon_config = FalconConfig()
-except ImportError:
+except Exception:
     falcon_config = None
 
 try:
@@ -1477,7 +1476,8 @@ def initialize_bot(massive_api_key, claude_api_key=None, symbols=None, initial_b
     print(f"Bot initialized with symbols: {symbols}")
     return bot
 
-if __name__ == '__main__':
+def main():
+    """CLI entry point for falcon-dashboard"""
     import sys
 
     # Get API keys from environment variables (preferred) or command line
@@ -1493,6 +1493,7 @@ if __name__ == '__main__':
     # Initialize YouTube strategy extractor if Claude API key is available
     if CLAUDE_API_KEY:
         print("Initializing YouTube strategy extractor with Claude API...")
+        global strategy_extractor
         strategy_extractor = YouTubeStrategyExtractor(CLAUDE_API_KEY)
         print("[OK] Strategy extractor ready")
     else:
@@ -1514,7 +1515,7 @@ if __name__ == '__main__':
     except ImportError as e:
         print(f"WARNING: Could not initialize trading bot: {e}")
         print("Dashboard running in standalone mode - strategy management available")
-    
+
     print("\n" + "="*80)
     print("Dashboard Server Starting")
     print("="*80)
@@ -1535,6 +1536,10 @@ if __name__ == '__main__':
     print(f"  - GET  /api/youtube-strategies/<id> - Get specific strategy")
     print(f"  - POST /api/youtube-strategies/submit - Submit YouTube URL")
     print("="*80 + "\n")
-    
+
     # Run Flask server
     app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)
+
+
+if __name__ == '__main__':
+    main()

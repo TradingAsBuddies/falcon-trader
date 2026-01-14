@@ -16,13 +16,11 @@ import time
 from datetime import datetime
 from typing import Dict, List, Optional
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-
-from db_manager import DatabaseManager
-from orchestrator.routers.strategy_router import StrategyRouter
-from orchestrator.validators.entry_validator import EntryValidator
-from orchestrator.engines import RSIEngine, MomentumEngine, BollingerEngine
-from orchestrator.execution.market_data_fetcher import MarketDataFetcher
+from falcon_core import DatabaseManager
+from falcon_trader.orchestrator.routers.strategy_router import StrategyRouter
+from falcon_trader.orchestrator.validators.entry_validator import EntryValidator
+from falcon_trader.orchestrator.engines import RSIEngine, MomentumEngine, BollingerEngine
+from falcon_trader.orchestrator.execution.market_data_fetcher import MarketDataFetcher
 
 
 class TradeExecutor:

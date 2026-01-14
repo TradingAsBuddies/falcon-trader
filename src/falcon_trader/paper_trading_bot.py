@@ -10,12 +10,11 @@ import requests
 import threading
 from datetime import datetime
 from typing import List, Dict, Optional
-from db_manager import DatabaseManager
+from falcon_core import DatabaseManager, FalconConfig
 
 try:
-    from config import FalconConfig
     falcon_config = FalconConfig()
-except ImportError:
+except Exception:
     falcon_config = None
 
 

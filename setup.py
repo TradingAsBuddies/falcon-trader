@@ -25,6 +25,13 @@ setup(
         "python-dotenv>=1.0.0",
         "PyYAML>=6.0",
     ],
+    extras_require={
+        "youtube": [
+            "youtube-transcript-api>=0.6.0",
+            "anthropic>=0.18.0",
+            "yt-dlp>=2024.1.0",
+        ],
+    },
     entry_points={
         "console_scripts": [
             "falcon-trader=falcon_trader.run_orchestrator:main",

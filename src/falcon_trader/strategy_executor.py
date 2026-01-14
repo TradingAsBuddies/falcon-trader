@@ -11,8 +11,8 @@ import pandas as pd
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
-from db_manager import DatabaseManager
-from paper_trading_bot import PaperTradingBot
+from falcon_core import DatabaseManager
+from falcon_trader.paper_trading_bot import PaperTradingBot
 
 
 @dataclass

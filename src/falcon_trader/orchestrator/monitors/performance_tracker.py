@@ -18,9 +18,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-
-from db_manager import DatabaseManager
+from falcon_core import DatabaseManager
 
 
 @dataclass
