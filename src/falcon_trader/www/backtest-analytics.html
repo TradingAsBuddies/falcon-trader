@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Falcon Backtest Analytics</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #e4e4e4;
+            padding: 1rem;
+        }
+        .container { max-width: 1600px; margin: 0 auto; }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem 0;
+            border-bottom: 1px solid #333;
+            margin-bottom: 1.5rem;
+        }
+        h1 { color: #00d4ff; font-size: 1.8rem; }
+        .nav-links a {
+            color: #00d4ff;
+            text-decoration: none;
+            margin-left: 1.5rem;
+            font-size: 0.9rem;
+        }
+        .nav-links a:hover { text-decoration: underline; }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        .stat-card {
+            background: rgba(255,255,255,0.05);
+            border-radius: 8px;
+            padding: 1rem;
+            border: 1px solid #333;
+        }
+        .stat-card h3 {
+            color: #888;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            margin-bottom: 0.3rem;
+        }
+        .stat-card .value {
+            font-size: 1.4rem;
+            color: #fff;
+            font-weight: 600;
+        }
+        .positive { color: #6bcb77 !important; }
+        .negative { color: #ff6b6b !important; }
+
+        /* Chart Panels */
+        .charts-row {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+        .charts-row.equal {
+            grid-template-columns: 1fr 1fr;
+        }
+
+        .panel {
+            background: rgba(255,255,255,0.05);
+            border-radius: 8px;
+            padding: 1.25rem;
+            border: 1px solid #333;
+        }
+        .panel.full-width {
+            grid-column: 1 / -1;
+        }
+        .panel h2 {
+            color: #00d4ff;
+            font-size: 1rem;
+            margin-bottom: 1rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .panel-controls {
+            display: flex;
+            gap: 0.5rem;
+        }
+        .panel-controls button, .panel-controls select {
+            background: transparent;
+            border: 1px solid #444;
+            color: #888;
+            padding: 0.25rem 0.75rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            cursor: pointer;
+        }
+        .panel-controls button:hover, .panel-controls select:hover {
+            border-color: #00d4ff;
+            color: #00d4ff;
+        }
+        .panel-controls button.active {
+            background: #00d4ff;
+            color: #1a1a2e;
+            border-color: #00d4ff;
+        }
+
+        .chart-container {
+            position: relative;
+            height: 280px;
+        }
+
+        /* Table Styles */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+        }
+        th, td {
+            padding: 0.75rem;
+            text-align: left;
+            border-bottom: 1px solid #333;
+        }
+        th {
+            color: #888;
+            font-weight: 500;
+            text-transform: uppercase;
+            font-size: 0.7rem;
+        }
+        tr:hover {
+            background: rgba(255,255,255,0.03);
+        }
+        .badge {
+            display: inline-block;
+            padding: 0.2rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            font-weight: 600;
+        }
+        .badge.success { background: rgba(107, 203, 119, 0.2); color: #6bcb77; }
+        .badge.warning { background: rgba(255, 193, 7, 0.2); color: #ffc107; }
+        .badge.danger { background: rgba(255, 107, 107, 0.2); color: #ff6b6b; }
+
+        /* Responsive */
+        @media (max-width: 1200px) {
+            .stats-grid { grid-template-columns: repeat(3, 1fr); }
+            .charts-row { grid-template-columns: 1fr; }
+        }
+        @media (max-width: 768px) {
+            .stats-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+
+        .loading {
+            text-align: center;
+            padding: 2rem;
+            color: #888;
+        }
+        .error {
+            background: rgba(255, 107, 107, 0.1);
+            border: 1px solid #ff6b6b;
+            padding: 1rem;
+            border-radius: 8px;
+            color: #ff6b6b;
+            margin-bottom: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Backtest Analytics</h1>
+            <nav class="nav-links">
+                <a href="/">Dashboard</a>
+                <a href="/analytics.html">Live Analytics</a>
+                <a href="/strategies.html">Strategies</a>
+                <a href="/orchestrator.html">Orchestrator</a>
+            </nav>
+        </header>
+
+        <div id="error-container"></div>
+
+        <!-- Summary Stats -->
+        <div class="stats-grid" id="stats-grid">
+            <div class="stat-card">
+                <h3>Total Backtest Runs</h3>
+                <div class="value" id="total-runs">-</div>
+            </div>
+            <div class="stat-card">
+                <h3>Strategies Tested</h3>
+                <div class="value" id="strategies-tested">-</div>
+            </div>
+            <div class="stat-card">
+                <h3>Avg Return</h3>
+                <div class="value" id="avg-return">-</div>
+            </div>
+            <div class="stat-card">
+                <h3>Avg Win Rate</h3>
+                <div class="value" id="avg-win-rate">-</div>
+            </div>
+            <div class="stat-card">
+                <h3>Total Trades</h3>
+                <div class="value" id="total-trades">-</div>
+            </div>
+        </div>
+
+        <!-- Strategy Comparison -->
+        <div class="charts-row">
+            <div class="panel">
+                <h2>
+                    Strategy Performance Comparison
+                    <div class="panel-controls">
+                        <select id="days-filter">
+                            <option value="7">7 Days</option>
+                            <option value="30">30 Days</option>
+                            <option value="90">90 Days</option>
+                            <option value="365">1 Year</option>
+                            <option value="730" selected>All Time</option>
+                        </select>
+                    </div>
+                </h2>
+                <table id="strategy-table">
+                    <thead>
+                        <tr>
+                            <th>Strategy</th>
+                            <th>Runs</th>
+                            <th>Symbols</th>
+                            <th>Avg Return</th>
+                            <th>Win Rate</th>
+                            <th>Sharpe</th>
+                            <th>Trades</th>
+                        </tr>
+                    </thead>
+                    <tbody id="strategy-tbody">
+                        <tr><td colspan="7" class="loading">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="panel">
+                <h2>Return Distribution</h2>
+                <div class="chart-container">
+                    <canvas id="return-chart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Daily Performance & Feedback History -->
+        <div class="charts-row equal">
+            <div class="panel">
+                <h2>Daily Performance</h2>
+                <div class="chart-container">
+                    <canvas id="daily-chart"></canvas>
+                </div>
+            </div>
+
+            <div class="panel">
+                <h2>Feedback Loop History</h2>
+                <table id="feedback-table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Strategy</th>
+                            <th>Symbols</th>
+                            <th>Avg Return</th>
+                            <th>Adjustments</th>
+                        </tr>
+                    </thead>
+                    <tbody id="feedback-tbody">
+                        <tr><td colspan="5" class="loading">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Recent Backtests -->
+        <div class="panel full-width">
+            <h2>
+                Recent Backtest Runs
+                <div class="panel-controls">
+                    <select id="strategy-filter">
+                        <option value="">All Strategies</option>
+                    </select>
+                    <select id="symbol-filter">
+                        <option value="">All Symbols</option>
+                    </select>
+                </div>
+            </h2>
+            <table id="backtests-table">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Strategy</th>
+                        <th>Symbol</th>
+                        <th>Interval</th>
+                        <th>Return</th>
+                        <th>Max DD</th>
+                        <th>Sharpe</th>
+                        <th>Win Rate</th>
+                        <th>Trades</th>
+                        <th>Signals</th>
+                    </tr>
+                </thead>
+                <tbody id="backtests-tbody">
+                    <tr><td colspan="10" class="loading">Loading...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '';
+        let returnChart = null;
+        let dailyChart = null;
+
+        // Utility functions
+        function formatPercent(value) {
+            if (value === null || value === undefined) return '-';
+            const pct = (value * 100).toFixed(2);
+            return `${pct}%`;
+        }
+
+        function formatNumber(value, decimals = 2) {
+            if (value === null || value === undefined) return '-';
+            return value.toFixed(decimals);
+        }
+
+        function getReturnClass(value) {
+            if (value === null || value === undefined) return '';
+            return value >= 0 ? 'positive' : 'negative';
+        }
+
+        function showError(message) {
+            const container = document.getElementById('error-container');
+            container.innerHTML = `<div class="error">${message}</div>`;
+        }
+
+        function clearError() {
+            document.getElementById('error-container').innerHTML = '';
+        }
+
+        // API calls
+        async function fetchJSON(endpoint) {
+            const response = await fetch(`${API_BASE}${endpoint}`);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            return response.json();
+        }
+
+        // Load strategy summary
+        async function loadStrategySummary() {
+            const days = document.getElementById('days-filter').value;
+            try {
+                const data = await fetchJSON(`/api/backtests/summary?days=${days}`);
+                const tbody = document.getElementById('strategy-tbody');
+
+                if (!data || data.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="7" class="loading">No backtest data available</td></tr>';
+                    return;
+                }
+
+                // Update stats
+                let totalRuns = 0, totalTrades = 0;
+                data.forEach(s => {
+                    totalRuns += s.total_runs || 0;
+                    totalTrades += s.total_trades || 0;
+                });
+
+                document.getElementById('total-runs').textContent = totalRuns;
+                document.getElementById('strategies-tested').textContent = data.length;
+                document.getElementById('total-trades').textContent = totalTrades;
+
+                // Calculate weighted averages
+                if (totalRuns > 0) {
+                    let weightedReturn = 0, weightedWinRate = 0;
+                    data.forEach(s => {
+                        const weight = (s.total_runs || 0) / totalRuns;
+                        weightedReturn += (s.avg_return || 0) * weight;
+                        weightedWinRate += (s.avg_win_rate || 0) * weight;
+                    });
+                    document.getElementById('avg-return').innerHTML =
+                        `<span class="${getReturnClass(weightedReturn)}">${formatPercent(weightedReturn)}</span>`;
+                    document.getElementById('avg-win-rate').textContent = formatPercent(weightedWinRate);
+                }
+
+                // Populate table
+                tbody.innerHTML = data.map(s => `
+                    <tr>
+                        <td><strong>${s.strategy_name}</strong></td>
+                        <td>${s.total_runs || 0}</td>
+                        <td>${s.symbols_tested || 0}</td>
+                        <td class="${getReturnClass(s.avg_return)}">${formatPercent(s.avg_return)}</td>
+                        <td>${formatPercent(s.avg_win_rate)}</td>
+                        <td>${formatNumber(s.avg_sharpe)}</td>
+                        <td>${s.total_trades || 0}</td>
+                    </tr>
+                `).join('');
+
+                // Update strategy filter
+                const strategyFilter = document.getElementById('strategy-filter');
+                const currentValue = strategyFilter.value;
+                strategyFilter.innerHTML = '<option value="">All Strategies</option>' +
+                    data.map(s => `<option value="${s.strategy_name}">${s.strategy_name}</option>`).join('');
+                strategyFilter.value = currentValue;
+
+                // Update return chart
+                updateReturnChart(data);
+
+            } catch (err) {
+                console.error('Failed to load strategy summary:', err);
+                document.getElementById('strategy-tbody').innerHTML =
+                    `<tr><td colspan="7" class="loading">Error loading data</td></tr>`;
+            }
+        }
+
+        // Load recent backtests
+        async function loadRecentBacktests() {
+            const days = document.getElementById('days-filter').value;
+            const strategy = document.getElementById('strategy-filter').value;
+            const symbol = document.getElementById('symbol-filter').value;
+
+            let url = `/api/backtests/recent?days=${days}&limit=50`;
+            if (strategy) url += `&strategy=${strategy}`;
+            if (symbol) url += `&symbol=${symbol}`;
+
+            try {
+                const data = await fetchJSON(url);
+                const tbody = document.getElementById('backtests-tbody');
+
+                if (!data || data.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="10" class="loading">No backtest runs found</td></tr>';
+                    return;
+                }
+
+                // Collect unique symbols for filter
+                const symbols = [...new Set(data.map(r => r.symbol))].sort();
+                const symbolFilter = document.getElementById('symbol-filter');
+                const currentSymbol = symbolFilter.value;
+                symbolFilter.innerHTML = '<option value="">All Symbols</option>' +
+                    symbols.map(s => `<option value="${s}">${s}</option>`).join('');
+                symbolFilter.value = currentSymbol;
+
+                // Populate table
+                tbody.innerHTML = data.map(r => `
+                    <tr>
+                        <td>${r.trading_date}</td>
+                        <td>${r.strategy_name}</td>
+                        <td><strong>${r.symbol}</strong></td>
+                        <td>${r.interval}</td>
+                        <td class="${getReturnClass(r.total_return)}">${formatPercent(r.total_return)}</td>
+                        <td class="negative">${formatPercent(r.max_drawdown)}</td>
+                        <td>${formatNumber(r.sharpe_ratio)}</td>
+                        <td>${formatPercent(r.win_rate)}</td>
+                        <td>${r.total_trades}</td>
+                        <td>${r.signals_count}</td>
+                    </tr>
+                `).join('');
+
+            } catch (err) {
+                console.error('Failed to load recent backtests:', err);
+                document.getElementById('backtests-tbody').innerHTML =
+                    `<tr><td colspan="10" class="loading">Error loading data</td></tr>`;
+            }
+        }
+
+        // Load feedback history
+        async function loadFeedbackHistory() {
+            const days = document.getElementById('days-filter').value;
+            try {
+                const data = await fetchJSON(`/api/feedback/history?days=${days}`);
+                const tbody = document.getElementById('feedback-tbody');
+
+                if (!data || data.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" class="loading">No feedback data</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = data.slice(0, 10).map(f => {
+                    let badge = '';
+                    if (f.adjustments_applied) {
+                        badge = '<span class="badge success">Applied</span>';
+                    } else if (f.adjustments_recommended) {
+                        badge = '<span class="badge warning">Recommended</span>';
+                    } else {
+                        badge = '<span class="badge">None</span>';
+                    }
+                    return `
+                        <tr>
+                            <td>${f.run_date}</td>
+                            <td>${f.strategy_name}</td>
+                            <td>${f.symbols_tested}</td>
+                            <td class="${getReturnClass(f.avg_return)}">${formatPercent(f.avg_return)}</td>
+                            <td>${badge}</td>
+                        </tr>
+                    `;
+                }).join('');
+
+            } catch (err) {
+                console.error('Failed to load feedback history:', err);
+                document.getElementById('feedback-tbody').innerHTML =
+                    `<tr><td colspan="5" class="loading">Error loading data</td></tr>`;
+            }
+        }
+
+        // Load daily performance
+        async function loadDailyPerformance() {
+            const days = document.getElementById('days-filter').value;
+            try {
+                const data = await fetchJSON(`/api/backtests/daily?days=${days}`);
+
+                if (!data || data.length === 0) {
+                    return;
+                }
+
+                // Group by date
+                const byDate = {};
+                data.forEach(d => {
+                    if (!byDate[d.trading_date]) {
+                        byDate[d.trading_date] = { returns: [], trades: 0 };
+                    }
+                    byDate[d.trading_date].returns.push(d.avg_return || 0);
+                    byDate[d.trading_date].trades += d.total_trades || 0;
+                });
+
+                const dates = Object.keys(byDate).sort();
+                const avgReturns = dates.map(d => {
+                    const returns = byDate[d].returns;
+                    return returns.reduce((a, b) => a + b, 0) / returns.length;
+                });
+
+                updateDailyChart(dates, avgReturns);
+
+            } catch (err) {
+                console.error('Failed to load daily performance:', err);
+            }
+        }
+
+        // Chart updates
+        function updateReturnChart(data) {
+            const ctx = document.getElementById('return-chart').getContext('2d');
+
+            if (returnChart) returnChart.destroy();
+
+            const colors = data.map(s => (s.avg_return || 0) >= 0 ? '#6bcb77' : '#ff6b6b');
+
+            returnChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: data.map(s => s.strategy_name),
+                    datasets: [{
+                        label: 'Avg Return',
+                        data: data.map(s => ((s.avg_return || 0) * 100).toFixed(2)),
+                        backgroundColor: colors,
+                        borderRadius: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        y: {
+                            grid: { color: '#333' },
+                            ticks: { color: '#888', callback: v => v + '%' }
+                        },
+                        x: {
+                            grid: { display: false },
+                            ticks: { color: '#888' }
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateDailyChart(dates, returns) {
+            const ctx = document.getElementById('daily-chart').getContext('2d');
+
+            if (dailyChart) dailyChart.destroy();
+
+            dailyChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: dates,
+                    datasets: [{
+                        label: 'Avg Daily Return',
+                        data: returns.map(r => (r * 100).toFixed(2)),
+                        borderColor: '#00d4ff',
+                        backgroundColor: 'rgba(0, 212, 255, 0.1)',
+                        fill: true,
+                        tension: 0.3
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        y: {
+                            grid: { color: '#333' },
+                            ticks: { color: '#888', callback: v => v + '%' }
+                        },
+                        x: {
+                            grid: { display: false },
+                            ticks: { color: '#888', maxRotation: 45 }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Event listeners
+        document.getElementById('days-filter').addEventListener('change', () => {
+            loadStrategySummary();
+            loadRecentBacktests();
+            loadFeedbackHistory();
+            loadDailyPerformance();
+        });
+
+        document.getElementById('strategy-filter').addEventListener('change', loadRecentBacktests);
+        document.getElementById('symbol-filter').addEventListener('change', loadRecentBacktests);
+
+        // Initial load
+        async function init() {
+            try {
+                clearError();
+                await Promise.all([
+                    loadStrategySummary(),
+                    loadRecentBacktests(),
+                    loadFeedbackHistory(),
+                    loadDailyPerformance()
+                ]);
+            } catch (err) {
+                showError('Failed to load backtest analytics. Make sure the API server is running.');
+                console.error(err);
+            }
+        }
+
+        init();
+
+        // Auto-refresh every 5 minutes
+        setInterval(init, 300000);
+    </script>
+</body>
+</html>

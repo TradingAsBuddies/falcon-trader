@@ -27,6 +27,15 @@ try:
 except ImportError:
     pass
 
+# Import backtest results API for analytics
+try:
+    from falcon_core.backtesting.results_api import BacktestResultsStore, create_api_routes
+    BACKTEST_RESULTS_AVAILABLE = True
+except ImportError:
+    BacktestResultsStore = None
+    create_api_routes = None
+    BACKTEST_RESULTS_AVAILABLE = False
+
 # Import your paper trading bot
 # Assuming the previous code is in a file called paper_trading_bot.py
 # from paper_trading_bot import PaperTradingBot, MassiveRealTimeFeed
@@ -39,6 +48,16 @@ bot = None
 
 # Initialize database manager (uses environment variables for config)
 db = get_db_manager()
+
+# Initialize backtest results store and register API routes
+backtest_results_store = None
+if BACKTEST_RESULTS_AVAILABLE:
+    try:
+        backtest_results_store = BacktestResultsStore()
+        create_api_routes(app, backtest_results_store)
+        print("Backtest analytics API routes registered")
+    except Exception as e:
+        print(f"Warning: Could not initialize backtest results store: {e}")
 
 # Get database path from config for legacy compatibility
 if falcon_config:
@@ -1168,6 +1187,13 @@ def get_trade_distribution():
 def serve_analytics():
     """Serve the analytics dashboard"""
     return send_file('www/analytics.html')
+
+
+@app.route('/backtest-analytics')
+@app.route('/backtest-analytics.html')
+def serve_backtest_analytics():
+    """Serve the backtest analytics dashboard"""
+    return send_file('www/backtest-analytics.html')
 
 
 # ============================================
