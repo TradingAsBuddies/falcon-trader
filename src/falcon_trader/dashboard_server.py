@@ -1205,7 +1205,7 @@ def serve_backtest_analytics():
 def list_screener_profiles():
     """List all screener profiles"""
     try:
-        from screener.profile_manager import ProfileManager
+        from falcon_screener.profile_manager import ProfileManager
         manager = ProfileManager(db)
 
         enabled_only = request.args.get('enabled', 'false').lower() == 'true'
@@ -1225,7 +1225,7 @@ def list_screener_profiles():
 def create_screener_profile():
     """Create a new screener profile"""
     try:
-        from screener.profile_manager import ProfileManager, ScreenerProfile
+        from falcon_screener.profile_manager import ProfileManager, ScreenerProfile
         manager = ProfileManager(db)
 
         data = request.get_json()
@@ -1251,7 +1251,7 @@ def create_screener_profile():
 def get_screener_profile(profile_id):
     """Get a specific screener profile"""
     try:
-        from screener.profile_manager import ProfileManager
+        from falcon_screener.profile_manager import ProfileManager
         manager = ProfileManager(db)
 
         profile = manager.get_profile(profile_id)
@@ -1270,7 +1270,7 @@ def get_screener_profile(profile_id):
 def update_screener_profile(profile_id):
     """Update a screener profile"""
     try:
-        from screener.profile_manager import ProfileManager, ScreenerProfile
+        from falcon_screener.profile_manager import ProfileManager, ScreenerProfile
         manager = ProfileManager(db)
 
         existing = manager.get_profile(profile_id)
@@ -1300,7 +1300,7 @@ def update_screener_profile(profile_id):
 def delete_screener_profile(profile_id):
     """Delete a screener profile"""
     try:
-        from screener.profile_manager import ProfileManager
+        from falcon_screener.profile_manager import ProfileManager
         manager = ProfileManager(db)
 
         if not manager.get_profile(profile_id):
@@ -1320,8 +1320,8 @@ def delete_screener_profile(profile_id):
 def run_screener_profile(profile_id):
     """Manually trigger a profile screening run"""
     try:
-        from screener.profile_manager import ProfileManager
-        from screener.multi_screener import MultiScreener
+        from falcon_screener.profile_manager import ProfileManager
+        from falcon_screener.multi_screener import MultiScreener
         manager = ProfileManager(db)
 
         profile = manager.get_profile(profile_id)
@@ -1347,8 +1347,8 @@ def run_screener_profile(profile_id):
 def get_screener_profile_performance(profile_id):
     """Get performance metrics for a profile"""
     try:
-        from screener.profile_manager import ProfileManager
-        from screener.feedback_loop import WeightFeedbackLoop
+        from falcon_screener.profile_manager import ProfileManager
+        from falcon_screener.feedback_loop import WeightFeedbackLoop
         manager = ProfileManager(db)
 
         profile = manager.get_profile(profile_id)
@@ -1388,8 +1388,8 @@ def get_screener_profile_performance(profile_id):
 def export_screener_profiles():
     """Export all profiles as YAML"""
     try:
-        from screener.profile_manager import ProfileManager
-        from screener.yaml_serializer import ProfileYAMLSerializer
+        from falcon_screener.profile_manager import ProfileManager
+        from falcon_screener.yaml_serializer import ProfileYAMLSerializer
         manager = ProfileManager(db)
 
         enabled_only = request.args.get('enabled', 'false').lower() == 'true'
@@ -1410,8 +1410,8 @@ def export_screener_profiles():
 def import_screener_profiles():
     """Import profiles from YAML"""
     try:
-        from screener.profile_manager import ProfileManager
-        from screener.yaml_serializer import ProfileYAMLSerializer
+        from falcon_screener.profile_manager import ProfileManager
+        from falcon_screener.yaml_serializer import ProfileYAMLSerializer
         manager = ProfileManager(db)
 
         # Get YAML content from request body
@@ -1437,8 +1437,8 @@ def import_screener_profiles():
 def adjust_profile_weights(profile_id):
     """Apply weight adjustments to a profile"""
     try:
-        from screener.profile_manager import ProfileManager
-        from screener.feedback_loop import WeightFeedbackLoop
+        from falcon_screener.profile_manager import ProfileManager
+        from falcon_screener.feedback_loop import WeightFeedbackLoop
         manager = ProfileManager(db)
 
         profile = manager.get_profile(profile_id)
@@ -1477,8 +1477,8 @@ def adjust_profile_weights(profile_id):
 def init_default_profiles():
     """Initialize default screener profiles"""
     try:
-        from screener.profile_manager import ProfileManager
-        from screener.profile_templates import initialize_default_profiles
+        from falcon_screener.profile_manager import ProfileManager
+        from falcon_screener.profile_templates import initialize_default_profiles
         manager = ProfileManager(db)
 
         data = request.get_json() or {}
