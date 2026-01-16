@@ -483,7 +483,7 @@ def stream():
 def get_strategy():
     """Get the current active strategy code"""
     try:
-        from strategy_manager import StrategyManager
+        from falcon_trader.strategy_manager import StrategyManager
         manager = StrategyManager()
         code = manager.get_active_strategy()
         return jsonify({
@@ -499,7 +499,7 @@ def validate_strategy():
     """Validate a strategy without deploying it"""
     try:
         from flask import request
-        from strategy_manager import StrategyManager
+        from falcon_trader.strategy_manager import StrategyManager
 
         data = request.get_json()
         if not data or 'code' not in data:
@@ -521,7 +521,7 @@ def backtest_strategy():
     """Run a backtest on a strategy"""
     try:
         from flask import request
-        from strategy_manager import StrategyManager
+        from falcon_trader.strategy_manager import StrategyManager
 
         data = request.get_json()
         if not data or 'code' not in data:
@@ -546,7 +546,7 @@ def deploy_strategy():
     """Deploy a new strategy (validates and backtests first)"""
     try:
         from flask import request
-        from strategy_manager import StrategyManager
+        from falcon_trader.strategy_manager import StrategyManager
 
         data = request.get_json()
         if not data or 'code' not in data:
@@ -576,7 +576,7 @@ def rollback_strategy():
     """Rollback to a previous strategy version"""
     try:
         from flask import request
-        from strategy_manager import StrategyManager
+        from falcon_trader.strategy_manager import StrategyManager
 
         data = request.get_json() or {}
         version = data.get('version')
@@ -596,7 +596,7 @@ def rollback_strategy():
 def list_strategy_versions():
     """List all strategy versions in history"""
     try:
-        from strategy_manager import StrategyManager
+        from falcon_trader.strategy_manager import StrategyManager
         manager = StrategyManager()
         versions = manager.list_versions()
         return jsonify({
@@ -686,7 +686,7 @@ def activate_youtube_strategy(youtube_strategy_id):
         return jsonify({"error": "YouTube features not available. Install with: pip install falcon-trader[youtube]"}), 503
     try:
         from strategy_parser import StrategyCodeGenerator
-        from strategy_manager import StrategyManager
+        from falcon_trader.strategy_manager import StrategyManager
 
         data = request.json or {}
         symbols = data.get('symbols', ['SPY', 'QQQ'])
