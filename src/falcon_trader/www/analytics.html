@@ -156,7 +156,7 @@
 <body>
     <div class="container">
         <header>
-            <h1>Analytics Dashboard</h1>
+            <h1>Backtest Analytics</h1>
             <nav class="nav-links">
                 <a href="/">Home</a>
                 <a href="/dashboard">Trading</a>
@@ -168,49 +168,50 @@
         <!-- Stats Overview -->
         <div class="stats-grid">
             <div class="stat-card">
-                <h3>Total Value</h3>
-                <div class="value" id="totalValue">$--</div>
-            </div>
-            <div class="stat-card">
-                <h3>Total P&L</h3>
-                <div class="value" id="totalPnL">$--</div>
-            </div>
-            <div class="stat-card">
-                <h3>Win Rate</h3>
-                <div class="value" id="winRate">--%</div>
+                <h3>Total Backtests</h3>
+                <div class="value" id="totalBacktests">--</div>
             </div>
             <div class="stat-card">
                 <h3>Total Trades</h3>
                 <div class="value" id="totalTrades">--</div>
             </div>
             <div class="stat-card">
-                <h3>Best Trade</h3>
-                <div class="value positive" id="bestTrade">$--</div>
+                <h3>Avg Return</h3>
+                <div class="value" id="avgReturn">--%</div>
             </div>
             <div class="stat-card">
-                <h3>Worst Trade</h3>
-                <div class="value negative" id="worstTrade">$--</div>
+                <h3>Win Rate</h3>
+                <div class="value" id="winRate">--%</div>
+            </div>
+            <div class="stat-card">
+                <h3>Best Return</h3>
+                <div class="value positive" id="bestReturn">--%</div>
+            </div>
+            <div class="stat-card">
+                <h3>Worst Return</h3>
+                <div class="value negative" id="worstReturn">--%</div>
             </div>
         </div>
 
-        <!-- Equity Curve -->
+        <!-- Performance Charts -->
         <div class="charts-row">
             <div class="panel">
                 <h2>
-                    Equity Curve
+                    Daily Backtest Performance
                     <div class="panel-controls">
-                        <button class="active" data-interval="hour" onclick="changeEquityInterval('hour')">Hourly</button>
-                        <button data-interval="day" onclick="changeEquityInterval('day')">Daily</button>
+                        <button class="active" data-days="30" onclick="changeDays(30)">30D</button>
+                        <button data-days="90" onclick="changeDays(90)">90D</button>
+                        <button data-days="365" onclick="changeDays(365)">1Y</button>
                     </div>
                 </h2>
                 <div class="chart-container tall">
-                    <canvas id="equityChart"></canvas>
+                    <canvas id="performanceChart"></canvas>
                 </div>
             </div>
             <div class="panel">
-                <h2>Daily P&L</h2>
+                <h2>Cumulative Returns</h2>
                 <div class="chart-container tall">
-                    <canvas id="pnlChart"></canvas>
+                    <canvas id="cumulativeChart"></canvas>
                 </div>
             </div>
         </div>
@@ -230,10 +231,10 @@
                         <thead>
                             <tr>
                                 <th>Strategy</th>
-                                <th>Trades</th>
+                                <th>Backtests</th>
                                 <th>Win Rate</th>
-                                <th>Return</th>
-                                <th>Sharpe</th>
+                                <th>Avg Return</th>
+                                <th>Trades</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -244,7 +245,7 @@
             </div>
         </div>
 
-        <!-- Trade Distribution -->
+        <!-- Return Distribution -->
         <div class="charts-row equal">
             <div class="panel">
                 <h2>Win/Loss Distribution</h2>
@@ -253,7 +254,7 @@
                 </div>
             </div>
             <div class="panel">
-                <h2>Trade P&L Histogram</h2>
+                <h2>Return Histogram</h2>
                 <div class="chart-container">
                     <canvas id="histogramChart"></canvas>
                 </div>
@@ -266,329 +267,324 @@
         Chart.defaults.color = '#888';
         Chart.defaults.borderColor = '#333';
 
-        let equityChart, pnlChart, strategyChart, winLossChart, histogramChart;
-        let currentInterval = 'hour';
+        let performanceChart, cumulativeChart, strategyChart, winLossChart, histogramChart;
+        let currentDays = 30;
+        let allBacktests = [];
 
         // Initialize charts
         async function initCharts() {
-            await Promise.all([
-                loadEquityChart(),
-                loadPnLChart(),
-                loadStrategyComparison(),
-                loadTradeDistribution(),
-                loadStats()
-            ]);
+            await loadAllData();
         }
 
-        // Load stats
-        async function loadStats() {
+        // Load all backtest data
+        async function loadAllData() {
             try {
-                const response = await fetch('/api/trades/summary');
-                const data = await response.json();
+                const [summaryRes, dailyRes, recentRes] = await Promise.all([
+                    fetch(`/api/backtests/summary?days=${currentDays}`),
+                    fetch(`/api/backtests/daily?days=${currentDays}`),
+                    fetch(`/api/backtests/recent?days=${currentDays}&limit=500`)
+                ]);
 
-                document.getElementById('totalTrades').textContent = data.totalTrades || 0;
-                document.getElementById('winRate').textContent = `${((data.winRate || 0) * 100).toFixed(1)}%`;
+                const summary = await summaryRes.json();
+                const daily = await dailyRes.json();
+                const recent = await recentRes.json();
 
-                const pnl = data.totalPnL || 0;
-                const pnlEl = document.getElementById('totalPnL');
-                pnlEl.textContent = `$${pnl.toFixed(2)}`;
-                pnlEl.className = `value ${pnl >= 0 ? 'positive' : 'negative'}`;
+                allBacktests = recent.backtests || [];
 
-                document.getElementById('bestTrade').textContent = `$${(data.bestTrade || 0).toFixed(2)}`;
-                document.getElementById('worstTrade').textContent = `$${(data.worstTrade || 0).toFixed(2)}`;
+                // Update stats
+                updateStats(summary);
 
-                // Get account value
-                const accResponse = await fetch('/api/account');
-                const accData = await accResponse.json();
-                if (accData.totalValue) {
-                    document.getElementById('totalValue').textContent = `$${accData.totalValue.toFixed(2)}`;
+                // Update charts
+                loadPerformanceChart(daily.daily_stats || []);
+                loadCumulativeChart(daily.daily_stats || []);
+                loadStrategyComparison(allBacktests);
+                loadReturnDistribution(allBacktests);
+            } catch (e) {
+                console.error('Error loading backtest data:', e);
+            }
+        }
+
+        // Update stats display
+        function updateStats(summary) {
+            document.getElementById('totalBacktests').textContent = summary.total_backtests || 0;
+            document.getElementById('totalTrades').textContent = summary.total_trades || 0;
+
+            const avgReturn = summary.avg_return_pct || 0;
+            const avgReturnEl = document.getElementById('avgReturn');
+            avgReturnEl.textContent = `${avgReturn.toFixed(2)}%`;
+            avgReturnEl.className = `value ${avgReturn >= 0 ? 'positive' : 'negative'}`;
+
+            const winRate = summary.win_rate || 0;
+            const winRateEl = document.getElementById('winRate');
+            winRateEl.textContent = `${(winRate * 100).toFixed(1)}%`;
+            winRateEl.className = `value ${winRate >= 0.5 ? 'positive' : 'negative'}`;
+
+            document.getElementById('bestReturn').textContent = `${(summary.max_return_pct || 0).toFixed(2)}%`;
+            document.getElementById('worstReturn').textContent = `${(summary.min_return_pct || 0).toFixed(2)}%`;
+        }
+
+        // Daily Performance Chart
+        function loadPerformanceChart(dailyStats) {
+            if (performanceChart) performanceChart.destroy();
+
+            const labels = dailyStats.map(d => d.date);
+            const avgReturns = dailyStats.map(d => d.avg_return_pct || 0);
+            const counts = dailyStats.map(d => d.backtest_count || 0);
+
+            performanceChart = new Chart(document.getElementById('performanceChart'), {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Avg Return %',
+                        data: avgReturns,
+                        backgroundColor: avgReturns.map(v => v >= 0 ? 'rgba(107, 203, 119, 0.7)' : 'rgba(255, 107, 107, 0.7)'),
+                        borderRadius: 4,
+                        yAxisID: 'y'
+                    }, {
+                        label: 'Backtests Run',
+                        data: counts,
+                        type: 'line',
+                        borderColor: '#00d4ff',
+                        backgroundColor: 'transparent',
+                        tension: 0.3,
+                        pointRadius: 3,
+                        yAxisID: 'y1'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'top' }
+                    },
+                    scales: {
+                        y: {
+                            position: 'left',
+                            title: { display: true, text: 'Return %' },
+                            ticks: { callback: v => v.toFixed(1) + '%' }
+                        },
+                        y1: {
+                            position: 'right',
+                            title: { display: true, text: 'Count' },
+                            grid: { drawOnChartArea: false },
+                            beginAtZero: true
+                        }
+                    }
                 }
-            } catch (e) {
-                console.error('Error loading stats:', e);
-            }
-        }
-
-        // Equity Chart
-        async function loadEquityChart(interval = 'hour') {
-            try {
-                const response = await fetch(`/api/charts/equity?interval=${interval}&limit=200`);
-                const data = await response.json();
-
-                if (data.status !== 'success') throw new Error(data.error);
-
-                const labels = data.data.map(d => d.timestamp);
-                const values = data.data.map(d => d.totalValue);
-                const cash = data.data.map(d => d.cash);
-
-                if (equityChart) equityChart.destroy();
-
-                equityChart = new Chart(document.getElementById('equityChart'), {
-                    type: 'line',
-                    data: {
-                        labels: labels,
-                        datasets: [{
-                            label: 'Total Value',
-                            data: values,
-                            borderColor: '#00d4ff',
-                            backgroundColor: 'rgba(0, 212, 255, 0.1)',
-                            fill: true,
-                            tension: 0.3,
-                            pointRadius: 0
-                        }, {
-                            label: 'Cash',
-                            data: cash,
-                            borderColor: '#6bcb77',
-                            backgroundColor: 'transparent',
-                            borderDash: [5, 5],
-                            tension: 0.3,
-                            pointRadius: 0
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        plugins: {
-                            legend: { position: 'top' }
-                        },
-                        scales: {
-                            x: {
-                                display: true,
-                                ticks: { maxTicksLimit: 10 }
-                            },
-                            y: {
-                                display: true,
-                                ticks: {
-                                    callback: v => '$' + v.toFixed(0)
-                                }
-                            }
-                        }
-                    }
-                });
-            } catch (e) {
-                console.error('Error loading equity chart:', e);
-            }
-        }
-
-        function changeEquityInterval(interval) {
-            currentInterval = interval;
-            document.querySelectorAll('.panel-controls button').forEach(btn => {
-                btn.classList.toggle('active', btn.dataset.interval === interval);
             });
-            loadEquityChart(interval);
         }
 
-        // P&L Chart
-        async function loadPnLChart() {
-            try {
-                const response = await fetch('/api/charts/pnl');
-                const data = await response.json();
+        // Cumulative Returns Chart
+        function loadCumulativeChart(dailyStats) {
+            if (cumulativeChart) cumulativeChart.destroy();
 
-                if (data.status !== 'success') throw new Error(data.error);
+            const labels = dailyStats.map(d => d.date);
+            let cumulative = 0;
+            const cumulativeReturns = dailyStats.map(d => {
+                cumulative += (d.avg_return_pct || 0);
+                return cumulative;
+            });
 
-                const labels = data.data.map(d => d.date);
-                const dailyPnL = data.data.map(d => d.dailyPnL);
-                const cumulative = data.data.map(d => d.cumulativePnL);
-
-                if (pnlChart) pnlChart.destroy();
-
-                pnlChart = new Chart(document.getElementById('pnlChart'), {
-                    type: 'bar',
-                    data: {
-                        labels: labels,
-                        datasets: [{
-                            label: 'Daily P&L',
-                            data: dailyPnL,
-                            backgroundColor: dailyPnL.map(v => v >= 0 ? 'rgba(107, 203, 119, 0.7)' : 'rgba(255, 107, 107, 0.7)'),
-                            borderRadius: 4
-                        }, {
-                            label: 'Cumulative',
-                            data: cumulative,
-                            type: 'line',
-                            borderColor: '#00d4ff',
-                            backgroundColor: 'transparent',
-                            tension: 0.3,
-                            pointRadius: 3,
-                            yAxisID: 'y1'
-                        }]
+            cumulativeChart = new Chart(document.getElementById('cumulativeChart'), {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Cumulative Return %',
+                        data: cumulativeReturns,
+                        borderColor: '#00d4ff',
+                        backgroundColor: 'rgba(0, 212, 255, 0.1)',
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'top' }
                     },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        plugins: {
-                            legend: { position: 'top' }
+                    scales: {
+                        x: {
+                            display: true,
+                            ticks: { maxTicksLimit: 10 }
                         },
-                        scales: {
-                            y: {
-                                position: 'left',
-                                ticks: { callback: v => '$' + v.toFixed(0) }
-                            },
-                            y1: {
-                                position: 'right',
-                                grid: { drawOnChartArea: false },
-                                ticks: { callback: v => '$' + v.toFixed(0) }
-                            }
+                        y: {
+                            display: true,
+                            ticks: { callback: v => v.toFixed(1) + '%' }
                         }
                     }
-                });
-            } catch (e) {
-                console.error('Error loading P&L chart:', e);
-            }
+                }
+            });
+        }
+
+        function changeDays(days) {
+            currentDays = days;
+            document.querySelectorAll('.panel-controls button').forEach(btn => {
+                btn.classList.toggle('active', parseInt(btn.dataset.days) === days);
+            });
+            loadAllData();
         }
 
         // Strategy Comparison
-        async function loadStrategyComparison() {
-            try {
-                const response = await fetch('/api/charts/strategy-comparison');
-                const data = await response.json();
-
-                if (data.status !== 'success') throw new Error(data.error);
-
-                const strategies = data.strategies;
-
-                // Update table
-                const tbody = document.querySelector('#strategyTable tbody');
-                if (strategies.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#888;">No strategy data yet</td></tr>';
-                } else {
-                    tbody.innerHTML = strategies.map(s => `
-                        <tr>
-                            <td class="strategy-name">${s.strategy}</td>
-                            <td>${s.totalTrades}</td>
-                            <td class="${s.winRate >= 0.5 ? 'positive' : 'negative'}">${(s.winRate * 100).toFixed(1)}%</td>
-                            <td class="${s.totalReturn >= 0 ? 'positive' : 'negative'}">${(s.totalReturn * 100).toFixed(2)}%</td>
-                            <td>${s.sharpeRatio?.toFixed(2) || '-'}</td>
-                        </tr>
-                    `).join('');
+        function loadStrategyComparison(backtests) {
+            // Group by strategy
+            const strategyMap = {};
+            backtests.forEach(bt => {
+                const strategy = bt.strategy_name || 'Unknown';
+                if (!strategyMap[strategy]) {
+                    strategyMap[strategy] = { trades: 0, wins: 0, returns: [], count: 0 };
                 }
+                strategyMap[strategy].trades += bt.total_trades || 0;
+                if ((bt.return_pct || 0) > 0) strategyMap[strategy].wins++;
+                strategyMap[strategy].returns.push(bt.return_pct || 0);
+                strategyMap[strategy].count++;
+            });
 
-                // Strategy chart
-                if (strategyChart) strategyChart.destroy();
+            const strategies = Object.entries(strategyMap).map(([name, data]) => {
+                const avgReturn = data.returns.reduce((a, b) => a + b, 0) / data.returns.length;
+                const winRate = data.wins / data.count;
+                return {
+                    strategy: name,
+                    totalTrades: data.trades,
+                    winRate: winRate,
+                    totalReturn: avgReturn,
+                    backtests: data.count
+                };
+            }).sort((a, b) => b.totalReturn - a.totalReturn);
 
-                if (strategies.length > 0) {
-                    strategyChart = new Chart(document.getElementById('strategyChart'), {
-                        type: 'radar',
-                        data: {
-                            labels: ['Win Rate', 'Return', 'Trades', 'Sharpe', 'Avg Profit'],
-                            datasets: strategies.slice(0, 5).map((s, i) => ({
-                                label: s.strategy,
-                                data: [
-                                    s.winRate * 100,
-                                    Math.min(Math.max(s.totalReturn * 100, -50), 50),
-                                    Math.min(s.totalTrades, 100),
-                                    Math.min(Math.max((s.sharpeRatio || 0) * 20, -50), 50),
-                                    Math.min(Math.max(s.avgProfit, -50), 50)
-                                ],
-                                borderColor: ['#00d4ff', '#6bcb77', '#ffd93d', '#ff6b6b', '#9b59b6'][i],
-                                backgroundColor: ['rgba(0,212,255,0.1)', 'rgba(107,203,119,0.1)', 'rgba(255,217,61,0.1)', 'rgba(255,107,107,0.1)', 'rgba(155,89,182,0.1)'][i]
-                            }))
-                        },
-                        options: {
-                            responsive: true,
-                            maintainAspectRatio: false,
-                            plugins: { legend: { position: 'bottom' } },
-                            scales: {
-                                r: {
-                                    beginAtZero: true,
-                                    grid: { color: '#333' },
-                                    angleLines: { color: '#333' }
-                                }
+            // Update table
+            const tbody = document.querySelector('#strategyTable tbody');
+            if (strategies.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#888;">No strategy data yet</td></tr>';
+            } else {
+                tbody.innerHTML = strategies.map(s => `
+                    <tr>
+                        <td class="strategy-name">${s.strategy}</td>
+                        <td>${s.backtests}</td>
+                        <td class="${s.winRate >= 0.5 ? 'positive' : 'negative'}">${(s.winRate * 100).toFixed(1)}%</td>
+                        <td class="${s.totalReturn >= 0 ? 'positive' : 'negative'}">${s.totalReturn.toFixed(2)}%</td>
+                        <td>${s.totalTrades}</td>
+                    </tr>
+                `).join('');
+            }
+
+            // Strategy chart
+            if (strategyChart) strategyChart.destroy();
+
+            if (strategies.length > 0) {
+                strategyChart = new Chart(document.getElementById('strategyChart'), {
+                    type: 'radar',
+                    data: {
+                        labels: ['Win Rate', 'Avg Return', 'Backtests', 'Trades', 'Consistency'],
+                        datasets: strategies.slice(0, 5).map((s, i) => ({
+                            label: s.strategy,
+                            data: [
+                                s.winRate * 100,
+                                Math.min(Math.max(s.totalReturn, -50), 50),
+                                Math.min(s.backtests, 100),
+                                Math.min(s.totalTrades / 10, 100),
+                                s.winRate * 50 + Math.min(s.backtests, 50)
+                            ],
+                            borderColor: ['#00d4ff', '#6bcb77', '#ffd93d', '#ff6b6b', '#9b59b6'][i],
+                            backgroundColor: ['rgba(0,212,255,0.1)', 'rgba(107,203,119,0.1)', 'rgba(255,217,61,0.1)', 'rgba(255,107,107,0.1)', 'rgba(155,89,182,0.1)'][i]
+                        }))
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { legend: { position: 'bottom' } },
+                        scales: {
+                            r: {
+                                beginAtZero: true,
+                                grid: { color: '#333' },
+                                angleLines: { color: '#333' }
                             }
                         }
-                    });
-                }
-            } catch (e) {
-                console.error('Error loading strategy comparison:', e);
+                    }
+                });
             }
         }
 
-        // Trade Distribution
-        async function loadTradeDistribution() {
-            try {
-                const response = await fetch('/api/charts/trade-distribution');
-                const data = await response.json();
+        // Return Distribution
+        function loadReturnDistribution(backtests) {
+            const returns = backtests.map(bt => bt.return_pct || 0);
+            const profitable = returns.filter(r => r > 0).length;
+            const losing = returns.filter(r => r <= 0).length;
 
-                if (data.status !== 'success') throw new Error(data.error);
+            // Win/Loss pie chart
+            if (winLossChart) winLossChart.destroy();
 
-                const summary = data.summary;
-                const trades = data.trades;
+            winLossChart = new Chart(document.getElementById('winLossChart'), {
+                type: 'doughnut',
+                data: {
+                    labels: ['Profitable', 'Losing'],
+                    datasets: [{
+                        data: [profitable, losing],
+                        backgroundColor: ['#6bcb77', '#ff6b6b'],
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'bottom' }
+                    },
+                    cutout: '60%'
+                }
+            });
 
-                // Win/Loss pie chart
-                if (winLossChart) winLossChart.destroy();
+            // Histogram
+            if (histogramChart) histogramChart.destroy();
 
-                winLossChart = new Chart(document.getElementById('winLossChart'), {
-                    type: 'doughnut',
+            if (returns.length > 0) {
+                const bins = {};
+                const binSize = 2; // 2% bins
+                returns.forEach(ret => {
+                    const bin = Math.floor(ret / binSize) * binSize;
+                    bins[bin] = (bins[bin] || 0) + 1;
+                });
+
+                const sortedBins = Object.keys(bins).map(Number).sort((a, b) => a - b);
+                const binLabels = sortedBins.map(b => `${b}%`);
+                const binValues = sortedBins.map(b => bins[b]);
+                const binColors = sortedBins.map(b => b >= 0 ? 'rgba(107, 203, 119, 0.7)' : 'rgba(255, 107, 107, 0.7)');
+
+                histogramChart = new Chart(document.getElementById('histogramChart'), {
+                    type: 'bar',
                     data: {
-                        labels: ['Profitable', 'Losing'],
+                        labels: binLabels,
                         datasets: [{
-                            data: [summary.profitable || 0, (summary.total || 0) - (summary.profitable || 0)],
-                            backgroundColor: ['#6bcb77', '#ff6b6b'],
-                            borderWidth: 0
+                            label: 'Backtest Count',
+                            data: binValues,
+                            backgroundColor: binColors,
+                            borderRadius: 4
                         }]
                     },
                     options: {
                         responsive: true,
                         maintainAspectRatio: false,
                         plugins: {
-                            legend: { position: 'bottom' }
+                            legend: { display: false }
                         },
-                        cutout: '60%'
+                        scales: {
+                            y: { beginAtZero: true }
+                        }
                     }
                 });
-
-                // Histogram
-                if (histogramChart) histogramChart.destroy();
-
-                // Create histogram bins
-                const pnlValues = trades.map(t => t.pnl).filter(p => p !== 0);
-                if (pnlValues.length > 0) {
-                    const bins = {};
-                    const binSize = 10;
-                    pnlValues.forEach(pnl => {
-                        const bin = Math.floor(pnl / binSize) * binSize;
-                        bins[bin] = (bins[bin] || 0) + 1;
-                    });
-
-                    const sortedBins = Object.keys(bins).map(Number).sort((a, b) => a - b);
-                    const binLabels = sortedBins.map(b => `$${b}`);
-                    const binValues = sortedBins.map(b => bins[b]);
-                    const binColors = sortedBins.map(b => b >= 0 ? 'rgba(107, 203, 119, 0.7)' : 'rgba(255, 107, 107, 0.7)');
-
-                    histogramChart = new Chart(document.getElementById('histogramChart'), {
-                        type: 'bar',
-                        data: {
-                            labels: binLabels,
-                            datasets: [{
-                                label: 'Trade Count',
-                                data: binValues,
-                                backgroundColor: binColors,
-                                borderRadius: 4
-                            }]
-                        },
-                        options: {
-                            responsive: true,
-                            maintainAspectRatio: false,
-                            plugins: {
-                                legend: { display: false }
-                            },
-                            scales: {
-                                y: { beginAtZero: true }
-                            }
-                        }
-                    });
-                }
-            } catch (e) {
-                console.error('Error loading trade distribution:', e);
             }
         }
 
         // Initialize on load
         initCharts();
 
-        // Auto-refresh every 60 seconds
+        // Auto-refresh every 5 minutes
         setInterval(() => {
-            loadStats();
-            loadEquityChart(currentInterval);
-        }, 60000);
+            loadAllData();
+        }, 300000);
     </script>
 </body>
 </html>
