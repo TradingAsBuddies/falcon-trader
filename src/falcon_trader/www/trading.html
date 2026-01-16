@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Falcon Trading Dashboard</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #e4e4e4;
+            padding: 1rem;
+        }
+        .container { max-width: 1400px; margin: 0 auto; }
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem 0;
+            border-bottom: 1px solid #333;
+            margin-bottom: 1.5rem;
+        }
+        h1 { color: #00d4ff; font-size: 1.8rem; }
+        .nav-links a {
+            color: #00d4ff;
+            text-decoration: none;
+            margin-left: 1.5rem;
+            font-size: 0.9rem;
+        }
+        .nav-links a:hover { text-decoration: underline; }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        .stat-card {
+            background: rgba(255,255,255,0.05);
+            border-radius: 8px;
+            padding: 1rem;
+            border: 1px solid #333;
+        }
+        .stat-card h3 {
+            color: #888;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            margin-bottom: 0.3rem;
+        }
+        .stat-card .value {
+            font-size: 1.4rem;
+            color: #fff;
+            font-weight: 600;
+        }
+        .positive { color: #6bcb77 !important; }
+        .negative { color: #ff6b6b !important; }
+
+        /* Panels */
+        .panels {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+        .panel {
+            background: rgba(255,255,255,0.05);
+            border-radius: 8px;
+            padding: 1.25rem;
+            border: 1px solid #333;
+        }
+        .panel.full { grid-column: 1 / -1; }
+        .panel h2 {
+            color: #00d4ff;
+            font-size: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        /* Tables */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            padding: 0.6rem;
+            text-align: left;
+            border-bottom: 1px solid #333;
+            font-size: 0.85rem;
+        }
+        th { color: #888; font-weight: 600; }
+        td { color: #e4e4e4; }
+        .ticker { font-weight: 600; color: #00d4ff; }
+
+        .loading { text-align: center; padding: 2rem; color: #888; }
+        .buy { color: #6bcb77; }
+        .sell { color: #ff6b6b; }
+
+        @media (max-width: 900px) {
+            .stats-grid { grid-template-columns: repeat(2, 1fr); }
+            .panels { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Trading Dashboard</h1>
+            <nav class="nav-links">
+                <a href="/">Home</a>
+                <a href="/analytics">Analytics</a>
+                <a href="/strategies.html">Strategies</a>
+                <a href="/orchestrator.html">Orchestrator</a>
+            </nav>
+        </header>
+
+        <!-- Account Stats -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <h3>Total Value</h3>
+                <div class="value" id="totalValue">$--</div>
+            </div>
+            <div class="stat-card">
+                <h3>Cash</h3>
+                <div class="value" id="cash">$--</div>
+            </div>
+            <div class="stat-card">
+                <h3>Positions Value</h3>
+                <div class="value" id="positionsValue">$--</div>
+            </div>
+            <div class="stat-card">
+                <h3>Total P&L</h3>
+                <div class="value" id="totalPnL">$--</div>
+            </div>
+            <div class="stat-card">
+                <h3>Return %</h3>
+                <div class="value" id="returnPct">--%</div>
+            </div>
+        </div>
+
+        <div class="panels">
+            <!-- Positions -->
+            <div class="panel">
+                <h2>Open Positions (<span id="positionCount">0</span>)</h2>
+                <div style="max-height: 400px; overflow-y: auto;">
+                    <table id="positionsTable">
+                        <thead>
+                            <tr>
+                                <th>Symbol</th>
+                                <th>Qty</th>
+                                <th>Avg Price</th>
+                                <th>Current</th>
+                                <th>Value</th>
+                                <th>P&L</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr><td colspan="6" class="loading">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Recent Trades -->
+            <div class="panel">
+                <h2>Recent Trades (<span id="tradeCount">0</span>)</h2>
+                <div style="max-height: 400px; overflow-y: auto;">
+                    <table id="tradesTable">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Symbol</th>
+                                <th>Side</th>
+                                <th>Qty</th>
+                                <th>Price</th>
+                                <th>P&L</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr><td colspan="6" class="loading">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Recommendations -->
+        <div class="panel full">
+            <h2>AI Stock Recommendations</h2>
+            <table id="recommendationsTable">
+                <thead>
+                    <tr>
+                        <th>Ticker</th>
+                        <th>Company</th>
+                        <th>Entry</th>
+                        <th>Target</th>
+                        <th>Stop Loss</th>
+                        <th>Risk</th>
+                        <th>Confidence</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td colspan="7" class="loading">Loading...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        async function loadAccount() {
+            try {
+                const response = await fetch('/api/account');
+                const data = await response.json();
+
+                document.getElementById('totalValue').textContent = `$${data.totalValue.toFixed(2)}`;
+                document.getElementById('cash').textContent = `$${data.cash.toFixed(2)}`;
+                document.getElementById('positionsValue').textContent = `$${data.positionsValue.toFixed(2)}`;
+
+                const pnl = data.totalValue - data.initialBalance;
+                const pnlPct = (pnl / data.initialBalance) * 100;
+
+                const pnlEl = document.getElementById('totalPnL');
+                pnlEl.textContent = `$${pnl.toFixed(2)}`;
+                pnlEl.className = `value ${pnl >= 0 ? 'positive' : 'negative'}`;
+
+                const pctEl = document.getElementById('returnPct');
+                pctEl.textContent = `${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%`;
+                pctEl.className = `value ${pnlPct >= 0 ? 'positive' : 'negative'}`;
+            } catch (e) {
+                console.error('Error loading account:', e);
+            }
+        }
+
+        async function loadPositions() {
+            try {
+                const response = await fetch('/api/positions');
+                const positions = await response.json();
+
+                document.getElementById('positionCount').textContent = positions.length;
+
+                if (positions.length === 0) {
+                    document.querySelector('#positionsTable tbody').innerHTML =
+                        '<tr><td colspan="6" style="text-align:center;color:#888;">No positions</td></tr>';
+                    return;
+                }
+
+                let html = '';
+                positions.forEach(p => {
+                    const value = p.quantity * p.currentPrice;
+                    const cost = p.quantity * p.avgPrice;
+                    const pnl = value - cost;
+                    const pnlClass = pnl >= 0 ? 'positive' : 'negative';
+
+                    html += `<tr>
+                        <td class="ticker">${p.symbol}</td>
+                        <td>${p.quantity}</td>
+                        <td>$${p.avgPrice.toFixed(2)}</td>
+                        <td>$${p.currentPrice.toFixed(2)}</td>
+                        <td>$${value.toFixed(2)}</td>
+                        <td class="${pnlClass}">$${pnl.toFixed(2)}</td>
+                    </tr>`;
+                });
+
+                document.querySelector('#positionsTable tbody').innerHTML = html;
+            } catch (e) {
+                console.error('Error loading positions:', e);
+                document.querySelector('#positionsTable tbody').innerHTML =
+                    '<tr><td colspan="6" style="color:#ff6b6b;">Error loading positions</td></tr>';
+            }
+        }
+
+        async function loadTrades() {
+            try {
+                const response = await fetch('/api/trades');
+                const trades = await response.json();
+
+                document.getElementById('tradeCount').textContent = trades.length;
+
+                if (trades.length === 0) {
+                    document.querySelector('#tradesTable tbody').innerHTML =
+                        '<tr><td colspan="6" style="text-align:center;color:#888;">No trades yet</td></tr>';
+                    return;
+                }
+
+                let html = '';
+                trades.slice(0, 20).forEach(t => {
+                    const date = new Date(t.timestamp);
+                    const timeStr = date.toLocaleString();
+                    const sideClass = t.side.toLowerCase() === 'buy' ? 'buy' : 'sell';
+                    const pnlClass = t.pnl > 0 ? 'positive' : t.pnl < 0 ? 'negative' : '';
+
+                    html += `<tr>
+                        <td>${timeStr}</td>
+                        <td class="ticker">${t.symbol}</td>
+                        <td class="${sideClass}">${t.side.toUpperCase()}</td>
+                        <td>${t.quantity}</td>
+                        <td>$${t.price.toFixed(2)}</td>
+                        <td class="${pnlClass}">${t.pnl ? '$' + t.pnl.toFixed(2) : '-'}</td>
+                    </tr>`;
+                });
+
+                document.querySelector('#tradesTable tbody').innerHTML = html;
+            } catch (e) {
+                console.error('Error loading trades:', e);
+                document.querySelector('#tradesTable tbody').innerHTML =
+                    '<tr><td colspan="6" style="color:#ff6b6b;">Error loading trades</td></tr>';
+            }
+        }
+
+        async function loadRecommendations() {
+            try {
+                const response = await fetch('/api/recommendations');
+                const data = await response.json();
+
+                if (!data.recommendations || data.recommendations.length === 0) {
+                    document.querySelector('#recommendationsTable tbody').innerHTML =
+                        '<tr><td colspan="7" style="text-align:center;color:#888;">No recommendations</td></tr>';
+                    return;
+                }
+
+                let html = '';
+                data.recommendations.forEach(r => {
+                    html += `<tr>
+                        <td class="ticker">${r.ticker}</td>
+                        <td>${r.company || '-'}</td>
+                        <td>${r.entry_price_range}</td>
+                        <td>${r.target_price}</td>
+                        <td>${r.stop_loss}</td>
+                        <td>${r.risk_level}</td>
+                        <td>${r.confidence_score}/10</td>
+                    </tr>`;
+                });
+
+                document.querySelector('#recommendationsTable tbody').innerHTML = html;
+            } catch (e) {
+                console.error('Error loading recommendations:', e);
+            }
+        }
+
+        // Load all data
+        loadAccount();
+        loadPositions();
+        loadTrades();
+        loadRecommendations();
+
+        // Auto-refresh every 30 seconds
+        setInterval(() => {
+            loadAccount();
+            loadPositions();
+            loadTrades();
+        }, 30000);
+    </script>
+</body>
+</html>

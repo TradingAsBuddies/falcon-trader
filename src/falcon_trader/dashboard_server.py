@@ -454,10 +454,16 @@ def serve_index():
 
 
 @app.route('/dashboard')
+@app.route('/trading')
+def serve_trading_dashboard():
+    """Serve the main trading dashboard with account, positions, and trades"""
+    return send_file('www/trading.html')
+
+
 @app.route('/orchestrator')
 @app.route('/orchestrator.html')
-def serve_dashboard():
-    """Serve the main trading dashboard with account, positions, and trades"""
+def serve_orchestrator():
+    """Serve the orchestrator dashboard"""
     return send_file('www/orchestrator.html')
 
 
