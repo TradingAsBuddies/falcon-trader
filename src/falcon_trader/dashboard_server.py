@@ -349,61 +349,98 @@ def get_ai_analysis():
 
 @app.route('/api/recommendations')
 def get_recommendations():
-    """Get AI stock recommendations from the screener"""
+    """Get AI stock recommendations from the screener database"""
     try:
-        screened_file = os.path.join(os.path.dirname(__file__), 'screened_stocks.json')
-        if not os.path.exists(screened_file):
+        from falcon_screener.profile_manager import ProfileManager
+        manager = ProfileManager(db)
+
+        # Get all profile runs from today, merge recommendations
+        all_recommendations = []
+        latest_timestamp = None
+        total_stocks = 0
+        profiles_run = []
+
+        for profile in manager.list_profiles(enabled_only=True):
+            runs = manager.get_profile_runs(profile.id, days=1)
+            if runs:
+                latest_run = runs[0]  # Most recent
+                run_data = latest_run.get('run_data', {})
+                recommendations = run_data.get('recommendations', [])
+
+                # Track metadata
+                if not latest_timestamp or latest_run.get('run_timestamp', '') > latest_timestamp:
+                    latest_timestamp = latest_run.get('run_timestamp')
+
+                total_stocks += latest_run.get('stocks_found', 0)
+                profiles_run.append({
+                    'profile_name': profile.name,
+                    'theme': profile.theme,
+                    'stocks_found': latest_run.get('stocks_found', 0),
+                    'run_type': latest_run.get('run_type')
+                })
+
+                # Add recommendations with profile source
+                for rec in recommendations:
+                    rec['_profile_source'] = profile.name
+                    rec['_theme'] = profile.theme
+                    all_recommendations.append(rec)
+
+        if not all_recommendations:
             return jsonify({
                 "status": "no_data",
                 "message": "No screening results available yet",
                 "recommendations": []
             })
 
-        with open(screened_file, 'r') as f:
-            results = json.load(f)
+        # Deduplicate by ticker, keeping highest confidence
+        ticker_map = {}
+        for rec in all_recommendations:
+            ticker = rec.get('ticker', '')
+            if not ticker:
+                continue
+            existing = ticker_map.get(ticker)
+            if not existing or rec.get('confidence_score', 0) > existing.get('confidence_score', 0):
+                ticker_map[ticker] = rec
 
-        if not results:
-            return jsonify({
-                "status": "no_data",
-                "message": "Screening results file is empty",
-                "recommendations": []
-            })
+        merged = sorted(ticker_map.values(), key=lambda x: x.get('confidence_score', 0), reverse=True)
 
-        # Return the most recent screening result
-        latest = results[-1]
         return jsonify({
             "status": "success",
-            "timestamp": latest.get('timestamp'),
-            "screen_type": latest.get('screen_type'),
-            "total_stocks_screened": latest.get('total_stocks', 0),
-            "recommendations": latest.get('recommendations', [])
+            "timestamp": latest_timestamp,
+            "screen_type": "multi-profile",
+            "total_stocks_screened": total_stocks,
+            "profiles_run": profiles_run,
+            "recommendations": merged
         })
-    except json.JSONDecodeError:
-        return jsonify({"error": "Invalid JSON in screened_stocks.json"}), 500
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 
 @app.route('/api/recommendations/history')
 def get_recommendations_history():
-    """Get historical screening results"""
+    """Get historical screening results from database"""
     try:
-        screened_file = os.path.join(os.path.dirname(__file__), 'screened_stocks.json')
-        if not os.path.exists(screened_file):
-            return jsonify({"history": []})
+        from falcon_screener.profile_manager import ProfileManager
+        manager = ProfileManager(db)
 
-        with open(screened_file, 'r') as f:
-            results = json.load(f)
+        days = int(request.args.get('days', 7))
 
-        # Return summary of each screening run
+        # Get runs from all profiles
         history = []
-        for result in results:
-            history.append({
-                "timestamp": result.get('timestamp'),
-                "screen_type": result.get('screen_type'),
-                "total_stocks": result.get('total_stocks', 0),
-                "recommendation_count": len(result.get('recommendations', []))
-            })
+        for profile in manager.list_profiles():
+            runs = manager.get_profile_runs(profile.id, days=days)
+            for run in runs:
+                history.append({
+                    "timestamp": run.get('run_timestamp'),
+                    "profile_name": profile.name,
+                    "theme": profile.theme,
+                    "run_type": run.get('run_type'),
+                    "stocks_found": run.get('stocks_found', 0),
+                    "recommendation_count": run.get('recommendations_generated', 0)
+                })
+
+        # Sort by timestamp descending
+        history.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
 
         return jsonify({"history": history})
     except Exception as e:
