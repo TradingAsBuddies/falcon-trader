@@ -285,18 +285,20 @@
                     fetch(`/api/backtests/recent?days=${currentDays}&limit=500`)
                 ]);
 
-                const summary = await summaryRes.json();
-                const daily = await dailyRes.json();
-                const recent = await recentRes.json();
+                const strategyStats = await summaryRes.json();  // Array of per-strategy summaries
+                const dailyStats = await dailyRes.json();       // Array of daily aggregates
+                allBacktests = await recentRes.json();          // Array of individual backtests
 
-                allBacktests = recent.backtests || [];
+                // Aggregate stats across all strategies
+                const summary = aggregateStats(strategyStats, allBacktests);
 
                 // Update stats
                 updateStats(summary);
 
-                // Update charts
-                loadPerformanceChart(daily.daily_stats || []);
-                loadCumulativeChart(daily.daily_stats || []);
+                // Update charts - group daily by date
+                const dailyByDate = groupDailyByDate(dailyStats);
+                loadPerformanceChart(dailyByDate);
+                loadCumulativeChart(dailyByDate);
                 loadStrategyComparison(allBacktests);
                 loadReturnDistribution(allBacktests);
             } catch (e) {
@@ -304,12 +306,70 @@
             }
         }
 
+        // Aggregate stats from strategy summaries and individual backtests
+        function aggregateStats(strategyStats, backtests) {
+            let totalRuns = 0;
+            let totalTrades = 0;
+            let totalReturn = 0;
+            let totalWinRate = 0;
+
+            strategyStats.forEach(s => {
+                totalRuns += s.total_runs || 0;
+                totalTrades += s.total_trades || 0;
+                totalReturn += (s.avg_return || 0) * (s.total_runs || 1);
+                totalWinRate += (s.avg_win_rate || 0) * (s.total_runs || 1);
+            });
+
+            const avgReturn = totalRuns > 0 ? totalReturn / totalRuns : 0;
+            const avgWinRate = totalRuns > 0 ? totalWinRate / totalRuns : 0;
+
+            // Find best/worst from individual backtests
+            let bestReturn = 0, worstReturn = 0;
+            backtests.forEach(bt => {
+                const ret = bt.total_return || 0;
+                if (ret > bestReturn) bestReturn = ret;
+                if (ret < worstReturn) worstReturn = ret;
+            });
+
+            return {
+                total_backtests: totalRuns,
+                total_trades: totalTrades,
+                avg_return: avgReturn,
+                win_rate: avgWinRate,
+                best_return: bestReturn,
+                worst_return: worstReturn
+            };
+        }
+
+        // Group daily stats by date
+        function groupDailyByDate(dailyStats) {
+            const byDate = {};
+            dailyStats.forEach(d => {
+                const date = d.trading_date;
+                if (!byDate[date]) {
+                    byDate[date] = { date, runs: 0, totalReturn: 0, totalTrades: 0 };
+                }
+                byDate[date].runs += d.runs || 0;
+                byDate[date].totalReturn += (d.avg_return || 0) * (d.runs || 1);
+                byDate[date].totalTrades += d.total_trades || 0;
+            });
+
+            return Object.values(byDate)
+                .map(d => ({
+                    date: d.date,
+                    avg_return_pct: d.runs > 0 ? d.totalReturn / d.runs : 0,
+                    backtest_count: d.runs,
+                    total_trades: d.totalTrades
+                }))
+                .sort((a, b) => a.date.localeCompare(b.date));
+        }
+
         // Update stats display
         function updateStats(summary) {
             document.getElementById('totalBacktests').textContent = summary.total_backtests || 0;
             document.getElementById('totalTrades').textContent = summary.total_trades || 0;
 
-            const avgReturn = summary.avg_return_pct || 0;
+            const avgReturn = summary.avg_return || 0;
             const avgReturnEl = document.getElementById('avgReturn');
             avgReturnEl.textContent = `${avgReturn.toFixed(2)}%`;
             avgReturnEl.className = `value ${avgReturn >= 0 ? 'positive' : 'negative'}`;
@@ -319,8 +379,8 @@
             winRateEl.textContent = `${(winRate * 100).toFixed(1)}%`;
             winRateEl.className = `value ${winRate >= 0.5 ? 'positive' : 'negative'}`;
 
-            document.getElementById('bestReturn').textContent = `${(summary.max_return_pct || 0).toFixed(2)}%`;
-            document.getElementById('worstReturn').textContent = `${(summary.min_return_pct || 0).toFixed(2)}%`;
+            document.getElementById('bestReturn').textContent = `${(summary.best_return || 0).toFixed(2)}%`;
+            document.getElementById('worstReturn').textContent = `${(summary.worst_return || 0).toFixed(2)}%`;
         }
 
         // Daily Performance Chart
@@ -438,8 +498,8 @@
                     strategyMap[strategy] = { trades: 0, wins: 0, returns: [], count: 0 };
                 }
                 strategyMap[strategy].trades += bt.total_trades || 0;
-                if ((bt.return_pct || 0) > 0) strategyMap[strategy].wins++;
-                strategyMap[strategy].returns.push(bt.return_pct || 0);
+                if ((bt.total_return || 0) > 0) strategyMap[strategy].wins++;
+                strategyMap[strategy].returns.push(bt.total_return || 0);
                 strategyMap[strategy].count++;
             });
 
@@ -510,7 +570,7 @@
 
         // Return Distribution
         function loadReturnDistribution(backtests) {
-            const returns = backtests.map(bt => bt.return_pct || 0);
+            const returns = backtests.map(bt => bt.total_return || 0);
             const profitable = returns.filter(r => r > 0).length;
             const losing = returns.filter(r => r <= 0).length;
 
