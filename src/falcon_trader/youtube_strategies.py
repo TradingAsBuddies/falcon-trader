@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """
 YouTube Trading Strategy Collection System
-Extracts trading strategies from YouTube videos using AI analysis
+Extracts trading strategies from YouTube videos using AI analysis.
+
+Strategy extraction prompt inspired by fabric-ai's extract_wisdom pattern.
+fabric-ai: https://github.com/danielmiessler/fabric
+Copyright (c) Daniel Miessler, MIT License
 """
 
 import datetime
@@ -154,7 +158,8 @@ class YouTubeStrategyExtractor:
         if not self.client:
             return {"error": "Claude API key not configured"}
 
-        # Fabric-style extract_wisdom prompt
+        # Prompt inspired by fabric-ai's extract_wisdom pattern
+        # https://github.com/danielmiessler/fabric
         prompt = f"""You are analyzing a YouTube video about trading strategies. Extract the key trading strategy wisdom from this transcript.
 
 Video Title: {video_title}
