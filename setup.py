@@ -15,6 +15,7 @@ setup(
     python_requires=">=3.9",
     install_requires=[
         "falcon-core @ git+https://github.com/TradingAsBuddies/falcon-core.git",
+        "falcon-screener @ git+https://github.com/TradingAsBuddies/falcon-screener.git",
         "backtrader>=1.9.78",
         "pandas>=2.0.3",
         "numpy>=1.24.3",
