@@ -15,7 +15,7 @@ RUN pip install --no-cache-dir --timeout 120 \
 
 # Copy and install trader
 COPY . .
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir ".[youtube]"
 
 # Dashboard runs on port 5000
 ENV FLASK_HOST=0.0.0.0
