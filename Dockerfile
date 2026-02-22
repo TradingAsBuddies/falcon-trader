@@ -9,9 +9,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends git \
 # Upgrade pip for better download handling
 RUN pip install --upgrade pip
 
-# Install falcon-core first (dependency)
+# Install falcon-core and psycopg2 for PostgreSQL support
 RUN pip install --no-cache-dir --timeout 120 \
-    "falcon-core @ git+https://github.com/TradingAsBuddies/falcon-core.git"
+    "falcon-core @ git+https://github.com/TradingAsBuddies/falcon-core.git" \
+    psycopg2-binary
+
+# Patch falcon-core with local fixes (until next release)
+COPY falcon-core/src/falcon_core/db_manager.py /usr/local/lib/python3.11/site-packages/falcon_core/db_manager.py
 
 # Copy and install trader
 COPY . .
