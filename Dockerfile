@@ -14,9 +14,6 @@ RUN pip install --no-cache-dir --timeout 120 \
     "falcon-core @ git+https://github.com/TradingAsBuddies/falcon-core.git" \
     psycopg2-binary
 
-# Patch falcon-core with local fixes (until next release)
-COPY falcon-core/src/falcon_core/db_manager.py /usr/local/lib/python3.11/site-packages/falcon_core/db_manager.py
-
 # Copy and install trader
 COPY . .
 RUN pip install --no-cache-dir ".[youtube]"
