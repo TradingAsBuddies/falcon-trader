@@ -1538,6 +1538,248 @@ def init_default_profiles():
         return jsonify({"error": str(e)}), 500
 
 
+# ============================================
+# AI ADVISOR ENDPOINTS
+# ============================================
+
+@app.route('/advisor')
+@app.route('/advisor.html')
+def serve_advisor():
+    """Serve the AI advisor dashboard"""
+    return send_file('www/advisor.html')
+
+
+@app.route('/api/advisor/proposals', methods=['GET'])
+def list_advisor_proposals():
+    """List advisor proposals, optionally filtered by status."""
+    status = request.args.get('status', 'pending')
+    try:
+        if status == 'all':
+            rows = db.execute(
+                '''SELECT id, strategy_name, proposal_type, change_description,
+                          analysis_summary, expected_improvement,
+                          status, api_cost_usd, created_at,
+                          current_sharpe, proposed_sharpe,
+                          current_win_rate, proposed_win_rate,
+                          current_total_return, proposed_total_return
+                   FROM strategy_proposals ORDER BY created_at DESC''',
+                fetch='all'
+            )
+        else:
+            rows = db.execute(
+                '''SELECT id, strategy_name, proposal_type, change_description,
+                          analysis_summary, expected_improvement,
+                          status, api_cost_usd, created_at,
+                          current_sharpe, proposed_sharpe,
+                          current_win_rate, proposed_win_rate,
+                          current_total_return, proposed_total_return
+                   FROM strategy_proposals WHERE status = %s
+                   ORDER BY created_at DESC''',
+                (status,), fetch='all'
+            )
+        proposals = []
+        for row in (rows or []):
+            if isinstance(row, dict):
+                proposals.append(row)
+            else:
+                proposals.append({
+                    'id': row[0], 'strategy_name': row[1],
+                    'proposal_type': row[2], 'change_description': row[3],
+                    'analysis_summary': row[4], 'expected_improvement': row[5],
+                    'status': row[6], 'api_cost_usd': row[7],
+                    'created_at': row[8],
+                    'current_sharpe': row[9], 'proposed_sharpe': row[10],
+                    'current_win_rate': row[11], 'proposed_win_rate': row[12],
+                    'current_total_return': row[13], 'proposed_total_return': row[14],
+                })
+        return jsonify(proposals)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/advisor/proposals/<int:proposal_id>', methods=['GET'])
+def get_advisor_proposal(proposal_id):
+    """Get full proposal detail including code."""
+    try:
+        row = db.execute(
+            '''SELECT * FROM strategy_proposals WHERE id = %s''',
+            (proposal_id,), fetch='one'
+        )
+        if not row:
+            return jsonify({"error": "Proposal not found"}), 404
+        proposal = dict(row) if hasattr(row, 'keys') else {
+            'id': row[0], 'strategy_name': row[1],
+            'proposal_type': row[2], 'current_code': row[3],
+            'proposed_code': row[4], 'analysis_summary': row[5],
+            'change_description': row[6], 'expected_improvement': row[7],
+            'current_sharpe': row[8], 'proposed_sharpe': row[9],
+            'current_win_rate': row[10], 'proposed_win_rate': row[11],
+            'current_total_return': row[12], 'proposed_total_return': row[13],
+            'status': row[14], 'reviewed_by': row[15],
+            'reviewed_at': row[16], 'review_notes': row[17],
+            'api_cost_usd': row[18], 'created_at': row[19],
+            'applied_at': row[20],
+        }
+        return jsonify(proposal)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/advisor/proposals/<int:proposal_id>/approve', methods=['POST'])
+def approve_advisor_proposal(proposal_id):
+    """Approve and apply a proposal."""
+    try:
+        row = db.execute(
+            'SELECT strategy_name, proposed_code, status FROM strategy_proposals WHERE id = %s',
+            (proposal_id,), fetch='one'
+        )
+        if not row:
+            return jsonify({"error": "Proposal not found"}), 404
+
+        name = row['strategy_name'] if isinstance(row, dict) else row[0]
+        proposed_code = row['proposed_code'] if isinstance(row, dict) else row[1]
+        status = row['status'] if isinstance(row, dict) else row[2]
+
+        if status != 'pending':
+            return jsonify({"error": f"Proposal is already '{status}'"}), 400
+
+        now = datetime.now().isoformat()
+        data = request.get_json(silent=True) or {}
+        reviewer = data.get('reviewed_by', 'dashboard')
+
+        # Update proposal status
+        db.execute(
+            '''UPDATE strategy_proposals SET
+               status = %s, reviewed_by = %s, reviewed_at = %s, applied_at = %s
+               WHERE id = %s''',
+            ('approved', reviewer, now, now, proposal_id)
+        )
+
+        # Apply to strategy_roster
+        db.execute(
+            '''UPDATE strategy_roster SET
+               strategy_code = %s, updated_at = %s
+               WHERE strategy_name = %s''',
+            (proposed_code, now, name)
+        )
+
+        # Log rotation
+        db.execute(
+            '''INSERT INTO strategy_rotation_log
+               (strategy_name, from_status, to_status, reason, rotated_at)
+               VALUES (%s, %s, %s, %s, %s)''',
+            (name, 'advisor_proposal', 'code_updated',
+             f'Approved proposal #{proposal_id}', now)
+        )
+
+        # Record improvement
+        try:
+            from falcon_core.backtesting.advisor import CostTracker
+            CostTracker(db).record_improvement(name, True)
+        except Exception:
+            pass
+
+        return jsonify({"status": "approved", "strategy_name": name})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/advisor/proposals/<int:proposal_id>/reject', methods=['POST'])
+def reject_advisor_proposal(proposal_id):
+    """Reject a proposal."""
+    try:
+        row = db.execute(
+            'SELECT strategy_name, status FROM strategy_proposals WHERE id = %s',
+            (proposal_id,), fetch='one'
+        )
+        if not row:
+            return jsonify({"error": "Proposal not found"}), 404
+
+        name = row['strategy_name'] if isinstance(row, dict) else row[0]
+        status = row['status'] if isinstance(row, dict) else row[1]
+
+        if status != 'pending':
+            return jsonify({"error": f"Proposal is already '{status}'"}), 400
+
+        now = datetime.now().isoformat()
+        data = request.get_json(silent=True) or {}
+
+        db.execute(
+            '''UPDATE strategy_proposals SET
+               status = %s, reviewed_by = %s, reviewed_at = %s, review_notes = %s
+               WHERE id = %s''',
+            ('rejected', data.get('reviewed_by', 'dashboard'), now,
+             data.get('review_notes', ''), proposal_id)
+        )
+
+        # Record no-improvement
+        try:
+            from falcon_core.backtesting.advisor import CostTracker
+            CostTracker(db).record_improvement(name, False)
+        except Exception:
+            pass
+
+        return jsonify({"status": "rejected", "strategy_name": name})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/advisor/proposals/<int:proposal_id>/backtest', methods=['POST'])
+def backtest_advisor_proposal(proposal_id):
+    """Trigger backtest comparison for a proposal."""
+    try:
+        from falcon_core.backtesting.advisor import StrategyAdvisor
+        advisor = StrategyAdvisor(db)
+        result = advisor.backtest_proposal(proposal_id)
+        if result:
+            return jsonify(result)
+        return jsonify({"error": "Backtest failed"}), 500
+    except ImportError:
+        return jsonify({"error": "Backtesting dependencies not available"}), 500
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/advisor/budgets', methods=['GET'])
+def get_advisor_budgets():
+    """Get budget status for all strategies."""
+    try:
+        from falcon_core.backtesting.advisor import CostTracker
+        tracker = CostTracker(db)
+        budgets = tracker.get_all_budgets()
+        return jsonify(budgets)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/advisor/usage', methods=['GET'])
+def get_advisor_usage():
+    """Get API usage history."""
+    try:
+        limit = int(request.args.get('limit', 100))
+        rows = db.execute(
+            '''SELECT id, service, model, strategy_name,
+                      input_tokens, output_tokens, cost_usd,
+                      request_type, created_at
+               FROM api_usage ORDER BY created_at DESC LIMIT %s''',
+            (limit,), fetch='all'
+        )
+        usage = []
+        for row in (rows or []):
+            if isinstance(row, dict):
+                usage.append(row)
+            else:
+                usage.append({
+                    'id': row[0], 'service': row[1], 'model': row[2],
+                    'strategy_name': row[3], 'input_tokens': row[4],
+                    'output_tokens': row[5], 'cost_usd': row[6],
+                    'request_type': row[7], 'created_at': row[8],
+                })
+        return jsonify(usage)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 def initialize_bot(massive_api_key, claude_api_key=None, symbols=None, initial_balance=10000.0):
     """Initialize the trading bot"""
     global bot

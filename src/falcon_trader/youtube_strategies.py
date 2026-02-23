@@ -213,6 +213,23 @@ Be concise and specific. Extract only factual information from the transcript.""
                 }]
             )
 
+            # Log API usage (best-effort)
+            try:
+                from falcon_core.backtesting.advisor import CostTracker
+                from falcon_core.db_manager import get_db_manager
+                _db = get_db_manager()
+                _tracker = CostTracker(_db)
+                _tracker.record_usage(
+                    strategy_name=None,
+                    service='youtube_extract',
+                    model=response.model,
+                    input_tokens=response.usage.input_tokens,
+                    output_tokens=response.usage.output_tokens,
+                    request_type='extract_strategy',
+                )
+            except Exception:
+                pass
+
             content = response.content[0].text
 
             # Try to extract JSON from response

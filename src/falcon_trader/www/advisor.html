@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Falcon - AI Strategy Advisor</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/diff2html/bundles/css/diff2html.min.css">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0a0e17; color: #e0e0e0; }
+        .nav { background: #111827; padding: 12px 24px; display: flex; gap: 20px; align-items: center; border-bottom: 1px solid #1f2937; }
+        .nav a { color: #9ca3af; text-decoration: none; font-size: 14px; }
+        .nav a:hover, .nav a.active { color: #60a5fa; }
+        .nav .brand { color: #f59e0b; font-weight: bold; font-size: 18px; margin-right: 20px; }
+        .container { max-width: 1400px; margin: 0 auto; padding: 24px; }
+        h1 { font-size: 24px; margin-bottom: 8px; }
+        .subtitle { color: #9ca3af; margin-bottom: 24px; }
+
+        .tabs { display: flex; gap: 4px; margin-bottom: 24px; }
+        .tab { padding: 8px 16px; background: #1f2937; border: 1px solid #374151; border-radius: 6px; cursor: pointer; color: #9ca3af; font-size: 14px; }
+        .tab.active { background: #1e3a5f; border-color: #3b82f6; color: #60a5fa; }
+
+        .panel { display: none; }
+        .panel.active { display: block; }
+
+        table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+        th { text-align: left; padding: 10px 12px; background: #111827; color: #9ca3af; font-size: 12px; text-transform: uppercase; border-bottom: 1px solid #1f2937; }
+        td { padding: 10px 12px; border-bottom: 1px solid #1f2937; font-size: 14px; }
+        tr:hover { background: #111827; }
+
+        .badge { padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 500; }
+        .badge-pending { background: #92400e; color: #fbbf24; }
+        .badge-approved { background: #065f46; color: #34d399; }
+        .badge-rejected { background: #991b1b; color: #fca5a5; }
+
+        .btn { padding: 6px 14px; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500; }
+        .btn-approve { background: #065f46; color: #34d399; }
+        .btn-approve:hover { background: #047857; }
+        .btn-reject { background: #991b1b; color: #fca5a5; }
+        .btn-reject:hover { background: #b91c1c; }
+        .btn-backtest { background: #1e3a5f; color: #60a5fa; }
+        .btn-backtest:hover { background: #1e40af; }
+        .btn-view { background: #374151; color: #d1d5db; }
+        .btn-view:hover { background: #4b5563; }
+
+        .card { background: #111827; border: 1px solid #1f2937; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+        .card h3 { font-size: 16px; margin-bottom: 8px; }
+        .card .metric { font-size: 24px; font-weight: bold; }
+        .card .label { font-size: 12px; color: #9ca3af; }
+        .cards-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 16px; margin-bottom: 24px; }
+
+        .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 1000; justify-content: center; align-items: center; }
+        .modal-overlay.open { display: flex; }
+        .modal { background: #1f2937; border: 1px solid #374151; border-radius: 12px; width: 90%; max-width: 1200px; max-height: 90vh; overflow-y: auto; padding: 24px; }
+        .modal h2 { margin-bottom: 16px; }
+        .modal .close { float: right; background: none; border: none; color: #9ca3af; font-size: 24px; cursor: pointer; }
+
+        .diff-container { background: #0d1117; border-radius: 8px; overflow: auto; max-height: 500px; margin: 16px 0; }
+        .comparison { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0; }
+        .comparison .col { background: #111827; padding: 12px; border-radius: 8px; }
+        .comparison .col h4 { margin-bottom: 8px; color: #9ca3af; font-size: 13px; }
+        .comparison .value { font-size: 20px; font-weight: bold; }
+        .positive { color: #34d399; }
+        .negative { color: #f87171; }
+        .neutral { color: #9ca3af; }
+
+        .budget-bar { height: 8px; background: #374151; border-radius: 4px; margin-top: 6px; }
+        .budget-bar .fill { height: 100%; border-radius: 4px; background: #3b82f6; }
+        .budget-bar .fill.warning { background: #f59e0b; }
+        .budget-bar .fill.danger { background: #ef4444; }
+
+        .empty-state { text-align: center; padding: 60px 20px; color: #6b7280; }
+        .empty-state h3 { font-size: 18px; margin-bottom: 8px; color: #9ca3af; }
+    </style>
+</head>
+<body>
+    <nav class="nav">
+        <span class="brand">Falcon</span>
+        <a href="/">Home</a>
+        <a href="/dashboard">Dashboard</a>
+        <a href="/analytics">Analytics</a>
+        <a href="/strategies.html">Strategies</a>
+        <a href="/advisor" class="active">AI Advisor</a>
+        <a href="/orchestrator">Orchestrator</a>
+    </nav>
+
+    <div class="container">
+        <h1>AI Strategy Advisor</h1>
+        <p class="subtitle">AI-powered strategy analysis, proposals, and budget tracking</p>
+
+        <div class="tabs">
+            <div class="tab active" data-tab="proposals">Proposals</div>
+            <div class="tab" data-tab="budgets">Budgets</div>
+            <div class="tab" data-tab="usage">API Usage</div>
+        </div>
+
+        <!-- Proposals Panel -->
+        <div id="proposals-panel" class="panel active">
+            <div style="margin-bottom: 16px;">
+                <select id="status-filter" style="background:#1f2937;color:#e0e0e0;border:1px solid #374151;padding:6px 12px;border-radius:4px;">
+                    <option value="pending">Pending</option>
+                    <option value="approved">Approved</option>
+                    <option value="rejected">Rejected</option>
+                    <option value="all">All</option>
+                </select>
+            </div>
+            <div id="proposals-table"></div>
+        </div>
+
+        <!-- Budgets Panel -->
+        <div id="budgets-panel" class="panel">
+            <div id="budgets-grid" class="cards-grid"></div>
+        </div>
+
+        <!-- Usage Panel -->
+        <div id="usage-panel" class="panel">
+            <div id="usage-table"></div>
+        </div>
+    </div>
+
+    <!-- Proposal Detail Modal -->
+    <div id="proposal-modal" class="modal-overlay">
+        <div class="modal">
+            <button class="close" onclick="closeModal()">&times;</button>
+            <div id="modal-content"></div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/diff2html/bundles/js/diff2html-ui.min.js"></script>
+    <script>
+        // Tab switching
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+                tab.classList.add('active');
+                document.getElementById(tab.dataset.tab + '-panel').classList.add('active');
+                if (tab.dataset.tab === 'budgets') loadBudgets();
+                if (tab.dataset.tab === 'usage') loadUsage();
+            });
+        });
+
+        document.getElementById('status-filter').addEventListener('change', loadProposals);
+
+        // Load proposals
+        async function loadProposals() {
+            const status = document.getElementById('status-filter').value;
+            try {
+                const res = await fetch(`/api/advisor/proposals?status=${status}`);
+                const proposals = await res.json();
+                if (proposals.error) throw new Error(proposals.error);
+
+                if (!proposals.length) {
+                    document.getElementById('proposals-table').innerHTML =
+                        '<div class="empty-state"><h3>No proposals</h3><p>Run falcon-advisor to generate proposals</p></div>';
+                    return;
+                }
+
+                let html = '<table><thead><tr><th>ID</th><th>Strategy</th><th>Type</th><th>Change</th><th>Status</th><th>Cost</th><th>Actions</th></tr></thead><tbody>';
+                for (const p of proposals) {
+                    const badge = `<span class="badge badge-${p.status}">${p.status}</span>`;
+                    const change = (p.change_description || '').substring(0, 60);
+                    const cost = p.api_cost_usd ? `$${Number(p.api_cost_usd).toFixed(4)}` : '-';
+                    let actions = `<button class="btn btn-view" onclick="viewProposal(${p.id})">View</button> `;
+                    if (p.status === 'pending') {
+                        actions += `<button class="btn btn-approve" onclick="approveProposal(${p.id})">Approve</button> `;
+                        actions += `<button class="btn btn-reject" onclick="rejectProposal(${p.id})">Reject</button> `;
+                        actions += `<button class="btn btn-backtest" onclick="backtestProposal(${p.id})">Backtest</button>`;
+                    }
+                    html += `<tr><td>${p.id}</td><td>${p.strategy_name}</td><td>${p.proposal_type || '-'}</td><td>${change}</td><td>${badge}</td><td>${cost}</td><td>${actions}</td></tr>`;
+                }
+                html += '</tbody></table>';
+                document.getElementById('proposals-table').innerHTML = html;
+            } catch (e) {
+                document.getElementById('proposals-table').innerHTML =
+                    `<div class="empty-state"><h3>Error loading proposals</h3><p>${e.message}</p></div>`;
+            }
+        }
+
+        // View proposal detail
+        async function viewProposal(id) {
+            try {
+                const res = await fetch(`/api/advisor/proposals/${id}`);
+                const p = await res.json();
+                if (p.error) throw new Error(p.error);
+
+                let metricsHtml = '';
+                if (p.current_sharpe != null || p.proposed_sharpe != null) {
+                    metricsHtml = `
+                    <h3>Backtest Comparison</h3>
+                    <div class="comparison">
+                        <div class="col"><h4>Current Sharpe</h4><div class="value">${fmt(p.current_sharpe)}</div></div>
+                        <div class="col"><h4>Proposed Sharpe</h4><div class="value ${cmp(p.proposed_sharpe, p.current_sharpe)}">${fmt(p.proposed_sharpe)}</div></div>
+                        <div class="col"><h4>Current Win Rate</h4><div class="value">${pct(p.current_win_rate)}</div></div>
+                        <div class="col"><h4>Proposed Win Rate</h4><div class="value ${cmp(p.proposed_win_rate, p.current_win_rate)}">${pct(p.proposed_win_rate)}</div></div>
+                        <div class="col"><h4>Current Return</h4><div class="value">${pct(p.current_total_return)}</div></div>
+                        <div class="col"><h4>Proposed Return</h4><div class="value ${cmp(p.proposed_total_return, p.current_total_return)}">${pct(p.proposed_total_return)}</div></div>
+                    </div>`;
+                }
+
+                let diffHtml = '';
+                if (p.current_code && p.proposed_code) {
+                    diffHtml = `<h3>Code Changes</h3><div id="diff-view" class="diff-container"></div>`;
+                }
+
+                document.getElementById('modal-content').innerHTML = `
+                    <h2>Proposal #${p.id} - ${p.strategy_name}</h2>
+                    <div class="card">
+                        <h3>Analysis</h3>
+                        <p>${p.analysis_summary || 'No analysis available'}</p>
+                    </div>
+                    <div class="card">
+                        <h3>Proposed Change</h3>
+                        <p><strong>Type:</strong> ${p.proposal_type || '-'}</p>
+                        <p>${p.change_description || '-'}</p>
+                        <p><strong>Expected:</strong> ${p.expected_improvement || '-'}</p>
+                    </div>
+                    ${metricsHtml}
+                    ${diffHtml}
+                    ${p.status === 'pending' ? `
+                    <div style="margin-top:16px;display:flex;gap:8px;">
+                        <button class="btn btn-approve" onclick="approveProposal(${p.id})">Approve</button>
+                        <button class="btn btn-reject" onclick="rejectProposal(${p.id})">Reject</button>
+                        <button class="btn btn-backtest" onclick="backtestProposal(${p.id})">Run Backtest</button>
+                    </div>` : ''}
+                `;
+                document.getElementById('proposal-modal').classList.add('open');
+
+                // Render diff if we have both code versions
+                if (p.current_code && p.proposed_code) {
+                    renderDiff(p.current_code, p.proposed_code);
+                }
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        }
+
+        function renderDiff(current, proposed) {
+            // Simple unified diff rendering
+            const container = document.getElementById('diff-view');
+            if (!container) return;
+
+            const currentLines = current.split('\n');
+            const proposedLines = proposed.split('\n');
+
+            let html = '<pre style="padding:12px;font-size:13px;line-height:1.5;">';
+            // Simple side indicator (not a real diff algorithm, but useful for viewing)
+            const maxLines = Math.max(currentLines.length, proposedLines.length);
+            for (let i = 0; i < maxLines; i++) {
+                const c = currentLines[i];
+                const p = proposedLines[i];
+                if (c === p) {
+                    html += `<span style="color:#8b949e"> ${esc(c || '')}</span>\n`;
+                } else {
+                    if (c !== undefined) html += `<span style="color:#f85149">-${esc(c)}</span>\n`;
+                    if (p !== undefined) html += `<span style="color:#3fb950">+${esc(p)}</span>\n`;
+                }
+            }
+            html += '</pre>';
+            container.innerHTML = html;
+        }
+
+        function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+        async function approveProposal(id) {
+            if (!confirm('Approve this proposal? The strategy code will be updated.')) return;
+            const res = await fetch(`/api/advisor/proposals/${id}/approve`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}' });
+            const data = await res.json();
+            if (data.error) { alert(data.error); return; }
+            alert('Proposal approved!');
+            closeModal();
+            loadProposals();
+        }
+
+        async function rejectProposal(id) {
+            const notes = prompt('Rejection reason (optional):') || '';
+            const res = await fetch(`/api/advisor/proposals/${id}/reject`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({review_notes: notes}) });
+            const data = await res.json();
+            if (data.error) { alert(data.error); return; }
+            alert('Proposal rejected.');
+            closeModal();
+            loadProposals();
+        }
+
+        async function backtestProposal(id) {
+            alert('Backtest started. This may take a few minutes...');
+            const res = await fetch(`/api/advisor/proposals/${id}/backtest`, { method: 'POST' });
+            const data = await res.json();
+            if (data.error) { alert('Backtest error: ' + data.error); return; }
+            alert('Backtest complete! Refresh to see results.');
+            viewProposal(id);
+        }
+
+        function closeModal() {
+            document.getElementById('proposal-modal').classList.remove('open');
+        }
+
+        // Budgets
+        async function loadBudgets() {
+            try {
+                const res = await fetch('/api/advisor/budgets');
+                const budgets = await res.json();
+                if (budgets.error) throw new Error(budgets.error);
+
+                if (!budgets.length) {
+                    document.getElementById('budgets-grid').innerHTML =
+                        '<div class="empty-state"><h3>No budgets configured</h3><p>Run falcon-advisor to create budgets</p></div>';
+                    return;
+                }
+
+                let html = '';
+                for (const b of budgets) {
+                    const monthSpent = Number(b.current_month_spent_usd || 0);
+                    const monthBudget = Number(b.monthly_budget_usd || 1);
+                    const pctUsed = Math.min(100, (monthSpent / monthBudget) * 100);
+                    const barClass = pctUsed > 90 ? 'danger' : pctUsed > 70 ? 'warning' : '';
+                    const totalSpent = Number(b.total_spent_usd || 0);
+
+                    html += `
+                    <div class="card">
+                        <h3>${b.strategy_name}</h3>
+                        <span class="badge badge-${b.status === 'active' ? 'approved' : 'rejected'}">${b.status}</span>
+                        <div style="margin-top:12px;">
+                            <div class="label">Monthly: $${monthSpent.toFixed(4)} / $${monthBudget.toFixed(2)}</div>
+                            <div class="budget-bar"><div class="fill ${barClass}" style="width:${pctUsed}%"></div></div>
+                        </div>
+                        <div style="margin-top:8px;">
+                            <div class="label">Lifetime: $${totalSpent.toFixed(4)}</div>
+                        </div>
+                        <div style="margin-top:8px;display:flex;gap:16px;">
+                            <div><div class="label">Months Active</div><div>${b.months_active || 0} / ${b.max_months || 4}</div></div>
+                            <div><div class="label">No-Improvement</div><div>${b.consecutive_no_improvement || 0}</div></div>
+                        </div>
+                    </div>`;
+                }
+                document.getElementById('budgets-grid').innerHTML = html;
+            } catch (e) {
+                document.getElementById('budgets-grid').innerHTML =
+                    `<div class="empty-state"><h3>Error</h3><p>${e.message}</p></div>`;
+            }
+        }
+
+        // Usage
+        async function loadUsage() {
+            try {
+                const res = await fetch('/api/advisor/usage?limit=50');
+                const usage = await res.json();
+                if (usage.error) throw new Error(usage.error);
+
+                if (!usage.length) {
+                    document.getElementById('usage-table').innerHTML =
+                        '<div class="empty-state"><h3>No API usage recorded</h3></div>';
+                    return;
+                }
+
+                let html = '<table><thead><tr><th>Time</th><th>Service</th><th>Model</th><th>Strategy</th><th>Tokens In</th><th>Tokens Out</th><th>Cost</th></tr></thead><tbody>';
+                for (const u of usage) {
+                    const cost = u.cost_usd ? `$${Number(u.cost_usd).toFixed(4)}` : '-';
+                    const time = u.created_at ? new Date(u.created_at).toLocaleString() : '-';
+                    html += `<tr><td>${time}</td><td>${u.service}</td><td>${u.model || '-'}</td><td>${u.strategy_name || '-'}</td><td>${u.input_tokens || 0}</td><td>${u.output_tokens || 0}</td><td>${cost}</td></tr>`;
+                }
+                html += '</tbody></table>';
+                document.getElementById('usage-table').innerHTML = html;
+            } catch (e) {
+                document.getElementById('usage-table').innerHTML =
+                    `<div class="empty-state"><h3>Error</h3><p>${e.message}</p></div>`;
+            }
+        }
+
+        // Helpers
+        function fmt(v) { return v != null ? Number(v).toFixed(2) : '-'; }
+        function pct(v) { return v != null ? (Number(v) * 100).toFixed(1) + '%' : '-'; }
+        function cmp(a, b) {
+            if (a == null || b == null) return 'neutral';
+            return Number(a) > Number(b) ? 'positive' : Number(a) < Number(b) ? 'negative' : 'neutral';
+        }
+
+        // Initial load
+        loadProposals();
+    </script>
+</body>
+</html>
