@@ -53,10 +53,11 @@ db = get_db_manager()
 backtest_results_store = None
 if BACKTEST_RESULTS_AVAILABLE:
     try:
-        db_path = os.getenv('DB_PATH')  # Use environment variable if set
-        backtest_results_store = BacktestResultsStore(db_path=db_path)
+        # Use shared DatabaseManager (PostgreSQL) so backtest results are in the main DB
+        db.init_schema()
+        backtest_results_store = BacktestResultsStore(db_manager=db)
         create_api_routes(app, backtest_results_store)
-        print(f"Backtest analytics API routes registered (db: {db_path or 'default'})")
+        print("Backtest analytics API routes registered (using main database)")
     except Exception as e:
         print(f"Warning: Could not initialize backtest results store: {e}")
 
