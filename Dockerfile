@@ -11,7 +11,7 @@ RUN pip install --upgrade pip
 
 # Install falcon-core and psycopg2 for PostgreSQL support
 RUN pip install --no-cache-dir --timeout 120 \
-    "falcon-core[advisor,postgresql] @ git+https://github.com/TradingAsBuddies/falcon-core.git@development" \
+    "falcon-core[advisor,postgresql] @ git+https://github.com/TradingAsBuddies/falcon-core.git" \
     psycopg2-binary
 
 # Copy and install trader
