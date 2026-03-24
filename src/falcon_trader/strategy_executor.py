@@ -13,6 +13,7 @@ from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from falcon_core import DatabaseManager
 from falcon_trader.paper_trading_bot import PaperTradingBot
+from falcon_trader.orchestrator.utils.timezone import now_et
 
 
 @dataclass
@@ -165,7 +166,7 @@ class StrategyInstance:
                 'quantity': quantity,
                 'entry_price': price,
                 'bars_held': 0,
-                'entry_time': datetime.now()
+                'entry_time': now_et()
             }
         elif action == 'sell':
             if symbol in self.positions:
@@ -244,7 +245,7 @@ class StrategyExecutor:
             current_price = self.bot.market_data.get(symbol, {}).get('price', 100)
 
             # Generate simple historical data
-            dates = pd.date_range(end=datetime.now(), periods=days, freq='D')
+            dates = pd.date_range(end=now_et(), periods=days, freq='D')
 
             # Simple random walk around current price
             import numpy as np

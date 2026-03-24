@@ -9,8 +9,10 @@ import yaml
 import time
 from datetime import datetime
 from falcon_trader.orchestrator.execution.trade_executor import TradeExecutor
+from falcon_trader.orchestrator.utils.timezone import now_et
 from falcon_trader.orchestrator.monitors.performance_tracker import PerformanceTracker
-from falcon_core import DatabaseManager
+from falcon_core import DatabaseManager, get_db_manager
+from falcon_trader.orchestrator.utils.cents import to_cents, to_dollars
 
 try:
     from dotenv import load_dotenv
@@ -36,10 +38,24 @@ def print_section(title):
     print(f"\n{'='*20} {title} {'='*20}")
 
 
+def _resolve_screener_path(screener_file='screened_stocks.json'):
+    """Resolve screener file path using FALCON_DATA_DIR"""
+    data_dir = os.environ.get('FALCON_DATA_DIR', '/var/lib/falcon')
+    path = os.path.join(data_dir, screener_file)
+    if os.path.exists(path):
+        return path
+    # Fallback to CWD
+    if os.path.exists(screener_file):
+        return screener_file
+    return path  # Return expected path even if not found
+
+
 def process_screener_results(executor, tracker, screener_file='screened_stocks.json'):
     """Process AI screener results through orchestrator"""
 
     print_section("PROCESSING AI SCREENER RESULTS")
+
+    screener_file = _resolve_screener_path(screener_file)
 
     if not os.path.exists(screener_file):
         print(f"[ERROR] Screener file not found: {screener_file}")
@@ -119,32 +135,39 @@ def show_account_status(executor):
 
     # Get account info
     account = db.execute("""
-        SELECT cash, total_value
+        SELECT cash
         FROM account
         ORDER BY id DESC
         LIMIT 1
     """, fetch='one')
 
-    if account:
-        cash, total_value = account
-        print(f"  Cash: ${cash:,.2f}")
-        print(f"  Total Value: ${total_value:,.2f}")
+    cash_cents = to_cents(float(account['cash'])) if account else 0
+    print(f"  Cash: ${to_dollars(cash_cents):,.2f}")
 
     # Get open positions
     positions = db.execute("""
-        SELECT symbol, quantity, entry_price, current_price,
-               (current_price - entry_price) / entry_price * 100 as pnl_pct
+        SELECT symbol, quantity, entry_price,
+               COALESCE(current_price, entry_price) as current_price
         FROM positions
         WHERE quantity > 0
     """, fetch='all')
 
+    positions_cents = 0
     if positions:
         print(f"\n  Open Positions: {len(positions)}")
-        for symbol, qty, entry, current, pnl in positions:
-            value = qty * current
-            print(f"    {symbol}: {qty} @ ${entry:.2f} -> ${current:.2f} ({pnl:+.2f}%) = ${value:,.2f}")
+        for pos in positions:
+            entry_cents = to_cents(float(pos['entry_price']))
+            current_cents = to_cents(float(pos['current_price']))
+            qty = int(float(pos['quantity']))
+            pnl_pct = ((current_cents - entry_cents) / entry_cents * 100) if entry_cents > 0 else 0.0
+            value_cents = current_cents * qty
+            positions_cents += value_cents
+            print(f"    {pos['symbol']}: {qty} @ ${to_dollars(entry_cents):.2f} -> ${to_dollars(current_cents):.2f} ({pnl_pct:+.2f}%) = ${to_dollars(value_cents):,.2f}")
     else:
         print(f"\n  Open Positions: 0")
+
+    total_cents = cash_cents + positions_cents
+    print(f"\n  Total Value: ${to_dollars(total_cents):,.2f}")
 
 
 def main():
@@ -153,12 +176,17 @@ def main():
     # Print banner
     print("\n")
     print_header("FALCON MULTI-STRATEGY ORCHESTRATOR")
-    print(f"Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"Started: {now_et().strftime('%Y-%m-%d %H:%M:%S')}")
     print_separator()
 
     # Load configuration
     print("\n[INIT] Loading configuration...")
-    config_file = 'orchestrator/orchestrator_config.yaml'
+    # Look for config in package data first, then CWD
+    config_file = os.path.join(
+        os.path.dirname(__file__), 'orchestrator', 'orchestrator_config.yaml'
+    )
+    if not os.path.exists(config_file):
+        config_file = 'orchestrator/orchestrator_config.yaml'
 
     if not os.path.exists(config_file):
         print(f"[ERROR] Configuration file not found: {config_file}")
@@ -169,10 +197,9 @@ def main():
 
     print(f"[OK] Configuration loaded")
 
-    # Initialize database
+    # Initialize database (uses DATABASE_URL from environment)
     print("[INIT] Initializing database...")
-    db_config = {'db_type': 'sqlite', 'db_path': './paper_trading.db'}
-    db = DatabaseManager(db_config)
+    db = get_db_manager()
     print(f"[OK] Database ready")
 
     # Initialize components
@@ -232,7 +259,7 @@ def main():
             while True:
                 cycle += 1
                 print(f"\n{'='*80}")
-                print(f"CYCLE {cycle} - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                print(f"CYCLE {cycle} - {now_et().strftime('%Y-%m-%d %H:%M:%S')}")
                 print(f"{'='*80}")
 
                 # Process screener results
@@ -257,7 +284,7 @@ def main():
 
     print("\n")
     print_separator()
-    print(f"Stopped: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"Stopped: {now_et().strftime('%Y-%m-%d %H:%M:%S')}")
     print_separator()
     print()
 

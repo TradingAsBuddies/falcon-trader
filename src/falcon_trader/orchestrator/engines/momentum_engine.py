@@ -17,6 +17,7 @@ from typing import Dict, Optional
 from datetime import datetime, timedelta
 
 from .base_engine import BaseStrategyEngine, TradeSignal
+from falcon_trader.orchestrator.utils.timezone import now_et
 
 
 class MomentumEngine(BaseStrategyEngine):
@@ -162,8 +163,8 @@ class MomentumEngine(BaseStrategyEngine):
             # We have a position - check for exit signals
             position.update_current_price(current_price)
 
-            # Calculate days held
-            days_held = (datetime.now() - position.entry_timestamp).days
+            # Calculate days held (both sides are ET-aware)
+            days_held = (now_et() - position.entry_timestamp).days
 
             # Check profit
             profit_pct = position.unrealized_pnl_pct

@@ -94,7 +94,15 @@ class OneCandleStrategy(bt.Strategy):
             print(f'{dt.isoformat()} {txt}')
 
     def is_trading_hours(self):
-        """Check if current time is within trading window (9:30-11 AM)"""
+        """
+        Check if current time is within trading window (9:30-11 AM ET).
+
+        IMPORTANT: The trading hours parameters are defined in US/Eastern.
+        This assumes the data feed timestamps have already been converted
+        to Eastern Time (falcon-core's data_feed.py handles this via
+        _filter_market_hours). If the data feed uses a different timezone
+        the comparison will be wrong.
+        """
         if len(self.data) == 0:
             return False
 

@@ -6,6 +6,7 @@ import threading
 import time
 from datetime import datetime
 from falcon_core import get_db_manager, FalconConfig
+from falcon_trader.orchestrator.utils.timezone import now_et
 
 # Optional YouTube strategy support
 try:
@@ -499,7 +500,7 @@ def stream():
                 
                 data = {
                     "type": "update",
-                    "timestamp": datetime.now().isoformat(),
+                    "timestamp": now_et().isoformat(),
                     "account": {
                         "totalValue": account_value['total_value'],
                         "cash": account_value['cash'],
@@ -788,8 +789,8 @@ def activate_youtube_strategy(youtube_strategy_id):
             'active',
             allocation_pct,
             1.0,
-            datetime.now().isoformat(),
-            datetime.now().isoformat()
+            now_et().isoformat(),
+            now_et().isoformat()
         ))
 
         return jsonify({
@@ -879,7 +880,7 @@ def pause_strategy(strategy_id):
             UPDATE active_strategies
             SET status = 'paused', deactivated_at = %s
             WHERE id = %s AND status = 'active'
-        ''', (datetime.now().isoformat(), strategy_id))
+        ''', (now_et().isoformat(), strategy_id))
 
         if rowcount == 0:
             return jsonify({"error": "Strategy not found or already paused"}), 404
@@ -901,7 +902,7 @@ def resume_strategy(strategy_id):
             UPDATE active_strategies
             SET status = 'active', activated_at = %s
             WHERE id = %s AND status = 'paused'
-        ''', (datetime.now().isoformat(), strategy_id))
+        ''', (now_et().isoformat(), strategy_id))
 
         if rowcount == 0:
             return jsonify({"error": "Strategy not found or not paused"}), 404
@@ -1644,7 +1645,7 @@ def approve_advisor_proposal(proposal_id):
         if status != 'pending':
             return jsonify({"error": f"Proposal is already '{status}'"}), 400
 
-        now = datetime.now().isoformat()
+        now = now_et().isoformat()
         data = request.get_json(silent=True) or {}
         reviewer = data.get('reviewed_by', 'dashboard')
 
@@ -1702,7 +1703,7 @@ def reject_advisor_proposal(proposal_id):
         if status != 'pending':
             return jsonify({"error": f"Proposal is already '{status}'"}), 400
 
-        now = datetime.now().isoformat()
+        now = now_et().isoformat()
         data = request.get_json(silent=True) or {}
 
         db.execute(

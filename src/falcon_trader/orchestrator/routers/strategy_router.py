@@ -6,6 +6,7 @@ import os
 from datetime import datetime
 from falcon_trader.orchestrator.routers.stock_classifier import StockClassifier
 from falcon_trader.orchestrator.utils.data_structures import RoutingDecision, StockProfile
+from falcon_trader.orchestrator.utils.timezone import now_et
 
 
 class StrategyRouter:
@@ -39,7 +40,7 @@ class StrategyRouter:
                 classification='unknown',
                 reason='Failed to fetch stock data, using default strategy',
                 confidence=0.50,
-                timestamp=datetime.now(),
+                timestamp=now_et(),
                 profile=profile
             )
 
@@ -56,7 +57,7 @@ class StrategyRouter:
             classification=profile.classification,
             reason=reason,
             confidence=confidence,
-            timestamp=datetime.now(),
+            timestamp=now_et(),
             profile=profile,
             alternatives=alternatives
         )

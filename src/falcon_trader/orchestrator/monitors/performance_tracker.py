@@ -18,7 +18,8 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 
-from falcon_core import DatabaseManager
+from falcon_core import DatabaseManager, get_db_manager
+from falcon_trader.orchestrator.utils.timezone import now_et
 
 
 @dataclass
@@ -64,8 +65,7 @@ class PerformanceTracker:
         if db_manager:
             self.db = db_manager
         else:
-            db_config = {'db_type': 'sqlite', 'db_path': 'paper_trading.db'}
-            self.db = DatabaseManager(db_config)
+            self.db = get_db_manager()
 
         # Create tables if they don't exist
         self._create_tables()
@@ -78,7 +78,7 @@ class PerformanceTracker:
             # Routing decisions table
             self.db.execute("""
                 CREATE TABLE IF NOT EXISTS routing_decisions (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id SERIAL PRIMARY KEY,
                     decision_id TEXT UNIQUE NOT NULL,
                     symbol TEXT NOT NULL,
                     selected_strategy TEXT NOT NULL,
@@ -92,7 +92,7 @@ class PerformanceTracker:
             # Trade tracking table
             self.db.execute("""
                 CREATE TABLE IF NOT EXISTS trade_tracking (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id SERIAL PRIMARY KEY,
                     trade_id TEXT UNIQUE NOT NULL,
                     symbol TEXT NOT NULL,
                     strategy TEXT NOT NULL,
@@ -114,7 +114,7 @@ class PerformanceTracker:
             # Strategy metrics table (aggregated)
             self.db.execute("""
                 CREATE TABLE IF NOT EXISTS strategy_metrics (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id SERIAL PRIMARY KEY,
                     strategy TEXT NOT NULL,
                     stock_type TEXT NOT NULL,
                     period_start TEXT NOT NULL,
@@ -161,7 +161,7 @@ class PerformanceTracker:
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s)
             """, (
                 decision_id, symbol, strategy, classification,
-                confidence, reason, datetime.now().isoformat()
+                confidence, reason, now_et().isoformat()
             ))
 
             print(f"[TRACKER] Logged routing: {symbol} -> {strategy} ({confidence:.1%})")
@@ -192,7 +192,7 @@ class PerformanceTracker:
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 trade_id, symbol, strategy, classification,
-                datetime.now().isoformat(), entry_price, quantity,
+                now_et().isoformat(), entry_price, quantity,
                 routing_confidence
             ))
 
@@ -226,7 +226,7 @@ class PerformanceTracker:
             entry_price = float(trade['entry_price'])
             quantity = int(trade['quantity'])
             entry_date = datetime.fromisoformat(trade['entry_date'])
-            exit_date = datetime.now()
+            exit_date = now_et()
 
             profit_loss = (exit_price - entry_price) * quantity
             profit_loss_pct = (exit_price - entry_price) / entry_price
@@ -271,8 +271,8 @@ class PerformanceTracker:
         """
         try:
             # Calculate metrics for last 30 days
-            start_date = (datetime.now() - timedelta(days=30)).isoformat()
-            end_date = datetime.now().isoformat()
+            start_date = (now_et() - timedelta(days=30)).isoformat()
+            end_date = now_et().isoformat()
 
             # Get completed trades
             trades = self.db.execute("""
@@ -339,7 +339,7 @@ class PerformanceTracker:
                 total_trades, winning_trades, losing_trades, win_rate,
                 avg_profit, avg_profit_winners, avg_loss_losers,
                 total_return, max_dd, avg_hold_days, sharpe,
-                datetime.now().isoformat()
+                now_et().isoformat()
             ))
 
         except Exception as e:
@@ -359,7 +359,7 @@ class PerformanceTracker:
             List of StrategyPerformance objects
         """
         try:
-            start_date = (datetime.now() - timedelta(days=days)).isoformat()
+            start_date = (now_et() - timedelta(days=days)).isoformat()
 
             if stock_type:
                 metrics = self.db.execute("""
@@ -424,7 +424,7 @@ class PerformanceTracker:
             Confidence accuracy score (0.0-1.0)
         """
         try:
-            start_date = (datetime.now() - timedelta(days=days)).isoformat()
+            start_date = (now_et() - timedelta(days=days)).isoformat()
 
             # Get trades with routing confidence
             trades = self.db.execute("""
@@ -476,7 +476,7 @@ class PerformanceTracker:
         try:
             report = {
                 'period_days': days,
-                'generated_at': datetime.now().isoformat(),
+                'generated_at': now_et().isoformat(),
                 'strategies': {},
                 'overall': {
                     'total_trades': 0,
@@ -542,7 +542,7 @@ class PerformanceTracker:
             List of (strategy, stock_type, metric_value) tuples
         """
         try:
-            start_date = (datetime.now() - timedelta(days=days)).isoformat()
+            start_date = (now_et() - timedelta(days=days)).isoformat()
 
             # Map metric names to columns
             metric_col = {
@@ -581,7 +581,7 @@ class PerformanceTracker:
             Dict with routing accuracy metrics
         """
         try:
-            start_date = (datetime.now() - timedelta(days=days)).isoformat()
+            start_date = (now_et() - timedelta(days=days)).isoformat()
 
             # Get all routing decisions with outcomes
             results = self.db.execute("""

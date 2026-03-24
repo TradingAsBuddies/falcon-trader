@@ -16,7 +16,10 @@ import time
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from falcon_core import DatabaseManager
+from falcon_trader.orchestrator.utils.timezone import now_et
+
+from falcon_core import DatabaseManager, get_db_manager
+from falcon_trader.orchestrator.utils.cents import to_cents, to_dollars, calc_cost, calc_pnl
 from falcon_trader.orchestrator.routers.strategy_router import StrategyRouter
 from falcon_trader.orchestrator.validators.entry_validator import EntryValidator
 from falcon_trader.orchestrator.engines import RSIEngine, MomentumEngine, BollingerEngine
@@ -49,8 +52,7 @@ class TradeExecutor:
         if db_manager:
             self.db = db_manager
         else:
-            db_config = {'db_type': 'sqlite', 'db_path': 'paper_trading.db'}
-            self.db = DatabaseManager(db_config)
+            self.db = get_db_manager()
 
         # Initialize components
         self.router = StrategyRouter(config)
@@ -84,7 +86,7 @@ class TradeExecutor:
         """
         result = {
             'symbol': symbol,
-            'timestamp': datetime.now().isoformat(),
+            'timestamp': now_et().isoformat(),
             'success': False,
             'action': 'NONE',
             'reason': '',
@@ -277,14 +279,16 @@ class TradeExecutor:
                         UPDATE positions
                         SET current_price = %s, last_updated = %s
                         WHERE symbol = %s
-                    """, (current_price, datetime.now().isoformat(), symbol))
+                    """, (current_price, now_et().isoformat(), symbol))
 
                     print(f"\n{symbol} ({strategy}):")
                     print(f"  Entry: ${pos_data['entry_price']:.2f}")
                     print(f"  Current: ${current_price:.2f}")
 
-                    # Calculate P&L
-                    pnl_pct = (current_price - pos_data['entry_price']) / pos_data['entry_price']
+                    # Calculate P&L (cents arithmetic)
+                    entry_price = float(pos_data['entry_price'])
+                    entry_cents = to_cents(entry_price)
+                    pnl_pct = (to_cents(current_price) - entry_cents) / entry_cents if entry_cents else 0.0
                     print(f"  P&L: {pnl_pct:+.1%}")
 
                     # Get engine for this strategy (map short name to full key)
@@ -415,42 +419,46 @@ class TradeExecutor:
             )
 
             positions = []
-            total_position_value = 0.0
-            total_unrealized_pnl = 0.0
+            total_position_cents = 0
+            total_pnl_cents = 0
 
             if positions_data:
                 for pos_data in positions_data:
                     symbol = pos_data['symbol']
+                    qty = int(pos_data['quantity'])
+                    entry = float(pos_data['entry_price'])
 
                     # Fetch current price
                     current_price = self.data_fetcher.get_current_price(symbol)
 
-                    position_value = current_price * pos_data['quantity']
-                    unrealized_pnl = (current_price - pos_data['entry_price']) * pos_data['quantity']
-                    unrealized_pnl_pct = (current_price - pos_data['entry_price']) / pos_data['entry_price']
+                    # Cents arithmetic
+                    pos_value_cents = to_cents(current_price) * qty
+                    pnl_cents = (to_cents(current_price) - to_cents(entry)) * qty
+                    entry_cents = to_cents(entry)
+                    pnl_pct = (to_cents(current_price) - entry_cents) / entry_cents if entry_cents else 0.0
 
-                    total_position_value += position_value
-                    total_unrealized_pnl += unrealized_pnl
+                    total_position_cents += pos_value_cents
+                    total_pnl_cents += pnl_cents
 
                     positions.append({
                         'symbol': symbol,
-                        'quantity': pos_data['quantity'],
-                        'entry_price': pos_data['entry_price'],
+                        'quantity': qty,
+                        'entry_price': entry,
                         'current_price': current_price,
-                        'position_value': position_value,
-                        'unrealized_pnl': unrealized_pnl,
-                        'unrealized_pnl_pct': unrealized_pnl_pct,
+                        'position_value': to_dollars(pos_value_cents),
+                        'unrealized_pnl': to_dollars(pnl_cents),
+                        'unrealized_pnl_pct': pnl_pct,
                         'strategy': pos_data.get('strategy', 'unknown')
                     })
 
-            total_value = cash + total_position_value
+            total_value = to_dollars(to_cents(cash) + total_position_cents)
 
             return {
                 'cash': cash,
-                'position_value': total_position_value,
+                'position_value': to_dollars(total_position_cents),
                 'total_value': total_value,
-                'unrealized_pnl': total_unrealized_pnl,
-                'unrealized_pnl_pct': (total_unrealized_pnl / total_value) if total_value > 0 else 0.0,
+                'unrealized_pnl': to_dollars(total_pnl_cents),
+                'unrealized_pnl_pct': (total_pnl_cents / (to_cents(cash) + total_position_cents)) if (to_cents(cash) + total_position_cents) > 0 else 0.0,
                 'positions_count': len(positions),
                 'positions': positions
             }

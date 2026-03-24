@@ -15,6 +15,8 @@ import numpy as np
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
+from falcon_trader.orchestrator.utils.timezone import now_et
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
 
@@ -101,8 +103,8 @@ class MarketDataFetcher:
             Market data dict or None
         """
         try:
-            # Calculate date range
-            end_date = datetime.now()
+            # Calculate date range (Eastern time so we align with US market days)
+            end_date = now_et()
             start_date = end_date - timedelta(days=lookback_days + 5)  # Extra buffer
 
             # Format dates for Polygon API
@@ -123,7 +125,7 @@ class MarketDataFetcher:
             if response.status_code == 200:
                 data = response.json()
 
-                if data.get('status') == 'OK' and data.get('results'):
+                if data.get('status') in ('OK', 'DELAYED') and data.get('results'):
                     results = data['results']
 
                     # Extract prices and volumes
@@ -235,8 +237,8 @@ class MarketDataFetcher:
                 current_price = current_df['Close'].iloc[-1]
                 current_volume = current_df['Volume'].iloc[-1]
 
-            # Get historical daily data
-            end_date = datetime.now()
+            # Get historical daily data (Eastern time for US market alignment)
+            end_date = now_et()
             start_date = end_date - timedelta(days=lookback_days + 5)
             hist_df = ticker.history(start=start_date, end=end_date)
 

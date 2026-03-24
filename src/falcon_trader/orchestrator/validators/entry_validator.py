@@ -7,6 +7,7 @@ import json
 from datetime import datetime, timedelta
 from typing import Optional, Dict
 from falcon_trader.orchestrator.utils.data_structures import ValidationResult
+from falcon_trader.orchestrator.utils.timezone import now_et, parse_timestamp
 
 
 class EntryValidator:
@@ -40,14 +41,14 @@ class EntryValidator:
         """
         # Cache screener data for 5 minutes
         if not force_reload and self.screener_data and self.screener_loaded_at:
-            elapsed = (datetime.now() - self.screener_loaded_at).total_seconds()
+            elapsed = (now_et() - self.screener_loaded_at).total_seconds()
             if elapsed < 300:  # 5 minutes
                 return True
 
         try:
             with open(self.screener_file, 'r') as f:
                 self.screener_data = json.load(f)
-                self.screener_loaded_at = datetime.now()
+                self.screener_loaded_at = now_et()
                 return True
         except FileNotFoundError:
             print(f"[WARNING] AI screener file not found: {self.screener_file}")
@@ -299,19 +300,10 @@ class EntryValidator:
             }
 
         try:
-            # Try multiple timestamp formats
-            # Format 1: ISO 8601 with timezone (e.g., "2026-01-05T18:11:24.043177-05:00")
-            try:
-                from dateutil import parser
-                screener_time = parser.parse(timestamp_str)
-                # Make naive for comparison
-                if screener_time.tzinfo is not None:
-                    screener_time = screener_time.replace(tzinfo=None)
-            except:
-                # Format 2: Simple format (e.g., "2026-01-08 05:01:23")
-                screener_time = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S")
-
-            age = datetime.now() - screener_time
+            # Parse timestamp and normalize to Eastern for apples-to-apples comparison.
+            # Screener outputs ET; naive strings are assumed UTC and converted.
+            screener_time = parse_timestamp(timestamp_str)
+            age = now_et() - screener_time
 
             # Warn if data is > 24 hours old
             if age.total_seconds() > 86400:  # 24 hours

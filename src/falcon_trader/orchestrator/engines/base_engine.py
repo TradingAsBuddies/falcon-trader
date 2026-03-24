@@ -15,6 +15,8 @@ from dataclasses import dataclass
 
 from falcon_core import DatabaseManager
 from falcon_trader.orchestrator.utils.data_structures import Position
+from falcon_trader.orchestrator.utils.cents import to_cents, to_dollars, calc_cost, calc_pnl
+from falcon_trader.orchestrator.utils.timezone import now_et, ensure_et
 
 
 @dataclass
@@ -116,13 +118,13 @@ class BaseStrategyEngine:
 
         return Position(
             symbol=result['symbol'],
-            quantity=result['quantity'],
-            entry_price=result['entry_price'],
-            current_price=result['entry_price'],  # Will be updated
-            stop_loss=stop_loss,
-            profit_target=profit_target,
+            quantity=int(result['quantity']),
+            entry_price=float(result['entry_price']),
+            current_price=float(result['entry_price']),  # Will be updated
+            stop_loss=float(stop_loss),
+            profit_target=float(profit_target),
             strategy=strategy,
-            entry_timestamp=datetime.fromisoformat(result['entry_date'])
+            entry_timestamp=ensure_et(datetime.fromisoformat(str(result['entry_date'])))
         )
 
     def get_account_balance(self) -> float:
@@ -146,9 +148,10 @@ class BaseStrategyEngine:
         Returns:
             Number of shares to buy
         """
-        cash = self.get_account_balance()
-        max_investment = cash * max_allocation
-        quantity = int(max_investment / price)
+        cash_cents = to_cents(self.get_account_balance())
+        max_cents = int(cash_cents * max_allocation)
+        price_cents = to_cents(price)
+        quantity = max_cents // price_cents if price_cents > 0 else 0
         return max(quantity, 0)
 
     def execute_buy(self, symbol: str, quantity: int, price: float,
@@ -178,11 +181,11 @@ class BaseStrategyEngine:
                     error=f"Already have position in {symbol}"
                 )
 
-            # Check if we have enough cash
-            cost = quantity * price
+            # Check if we have enough cash (arithmetic in cents)
+            cost = calc_cost(quantity, price)
             cash = self.get_account_balance()
 
-            if cost > cash:
+            if to_cents(cost) > to_cents(cash):
                 return ExecutionResult(
                     success=False,
                     symbol=symbol,
@@ -197,7 +200,7 @@ class BaseStrategyEngine:
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s)
             """, (
                 symbol, 'BUY', quantity, price,
-                datetime.now().isoformat(),
+                now_et().isoformat(),
                 self.strategy_name, reason
             ))
 
@@ -208,20 +211,20 @@ class BaseStrategyEngine:
                     stop_loss, profit_target, strategy, last_updated
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT(symbol) DO UPDATE SET
-                    quantity = quantity + %s,
+                    quantity = positions.quantity + %s,
                     last_updated = %s
             """, (
-                symbol, quantity, price, datetime.now().isoformat(),
+                symbol, quantity, price, now_et().isoformat(),
                 stop_loss, profit_target, self.strategy_name,
-                datetime.now().isoformat(),
-                quantity, datetime.now().isoformat()
+                now_et().isoformat(),
+                quantity, now_et().isoformat()
             ))
 
-            # Update cash balance
-            new_cash = cash - cost
+            # Update cash balance (cents arithmetic, store as dollars)
+            new_cash = to_dollars(to_cents(cash) - to_cents(cost))
             self.db.execute(
                 "UPDATE account SET cash = %s, last_updated = %s",
-                (new_cash, datetime.now().isoformat())
+                (new_cash, now_et().isoformat())
             )
 
             return ExecutionResult(
@@ -231,7 +234,7 @@ class BaseStrategyEngine:
                 quantity=quantity,
                 price=price,
                 reason=reason,
-                timestamp=datetime.now()
+                timestamp=now_et()
             )
 
         except Exception as e:
@@ -270,9 +273,9 @@ class BaseStrategyEngine:
             if quantity > position.quantity:
                 quantity = position.quantity
 
-            # Calculate P&L
-            pnl = (price - position.entry_price) * quantity
-            print(f"[P&L] {symbol}: sold {quantity} @ ${price:.4f}, entry @ ${position.entry_price:.4f}, P&L: ${pnl:.2f}")
+            # Calculate P&L (cents arithmetic)
+            pnl = calc_pnl(price, position.entry_price, quantity)
+            print(f"[P&L] {symbol}: sold {quantity} @ ${price:.2f}, entry @ ${position.entry_price:.2f}, P&L: ${pnl:.2f}")
 
             # Insert order record with P&L
             self.db.execute("""
@@ -282,7 +285,7 @@ class BaseStrategyEngine:
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 symbol, 'SELL', quantity, price,
-                datetime.now().isoformat(),
+                now_et().isoformat(),
                 self.strategy_name, reason, pnl
             ))
 
@@ -298,16 +301,16 @@ class BaseStrategyEngine:
                 # Reduce position
                 self.db.execute(
                     "UPDATE positions SET quantity = %s, last_updated = %s WHERE symbol = %s",
-                    (new_quantity, datetime.now().isoformat(), symbol)
+                    (new_quantity, now_et().isoformat(), symbol)
                 )
 
-            # Update cash balance
-            proceeds = quantity * price
+            # Update cash balance (cents arithmetic)
+            proceeds = calc_cost(quantity, price)
             cash = self.get_account_balance()
-            new_cash = cash + proceeds
+            new_cash = to_dollars(to_cents(cash) + to_cents(proceeds))
             self.db.execute(
                 "UPDATE account SET cash = %s, last_updated = %s",
-                (new_cash, datetime.now().isoformat())
+                (new_cash, now_et().isoformat())
             )
 
             return ExecutionResult(
@@ -318,7 +321,7 @@ class BaseStrategyEngine:
                 price=price,
                 pnl=pnl,
                 reason=reason,
-                timestamp=datetime.now()
+                timestamp=now_et()
             )
 
         except Exception as e:

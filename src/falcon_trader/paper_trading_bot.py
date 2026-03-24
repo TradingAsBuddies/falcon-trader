@@ -11,6 +11,8 @@ import threading
 from datetime import datetime
 from typing import List, Dict, Optional
 from falcon_core import DatabaseManager, FalconConfig
+from falcon_trader.orchestrator.utils.cents import to_cents, to_dollars, calc_cost, calc_pnl, calc_avg_price
+from falcon_trader.orchestrator.utils.timezone import now_et
 
 try:
     falcon_config = FalconConfig()
@@ -66,10 +68,9 @@ class PaperTradingBot:
         try:
             account = self.db.execute("SELECT * FROM account LIMIT 1", fetch='one')
             if not account:
-                from datetime import datetime
                 self.db.execute(
                     "INSERT INTO account (cash, last_updated) VALUES (%s, %s)",
-                    (initial_balance, datetime.now().isoformat())
+                    (initial_balance, now_et().isoformat())
                 )
                 print(f"[BOT] Account initialized with ${initial_balance:,.2f}")
         except Exception as e:
@@ -79,22 +80,22 @@ class PaperTradingBot:
         """Get current account information"""
         account = self.db.execute("SELECT * FROM account LIMIT 1", fetch='one')
         if account:
-            cash = float(account['cash'])
+            cash_cents = to_cents(float(account['cash']))
 
-            # Calculate total value (cash + positions)
+            # Calculate total value (cash + positions) in cents
             positions = self.get_positions()
-            positions_value = 0.0
+            positions_cents = 0
             for pos in positions:
                 quote = self.get_quote(pos['symbol'])
                 if quote:
-                    positions_value += float(quote['price']) * float(pos['quantity'])
+                    positions_cents += to_cents(float(quote['price'])) * int(float(pos['quantity']))
 
-            total_value = cash + positions_value
+            total_cents = cash_cents + positions_cents
 
             return {
-                'cash': cash,
-                'total_value': total_value,
-                'updated_at': account['last_updated'] if 'last_updated' in account.keys() else datetime.now().isoformat()
+                'cash': to_dollars(cash_cents),
+                'total_value': to_dollars(total_cents),
+                'updated_at': account['last_updated'] if 'last_updated' in account.keys() else now_et().isoformat()
             }
         return {'cash': 0.0, 'total_value': 0.0}
 
@@ -184,19 +185,19 @@ class PaperTradingBot:
                 return {'status': 'error', 'message': f'Could not get quote for {symbol}'}
 
             execution_price = price if order_type == 'limit' and price else quote['price']
-            total_cost = execution_price * quantity
+            total_cost = calc_cost(quantity, execution_price)
 
             # Check account balance for buys
             if side == 'buy':
                 account = self.get_account()
-                if account['cash'] < total_cost:
+                if to_cents(account['cash']) < to_cents(total_cost):
                     return {
                         'status': 'error',
                         'message': f'Insufficient funds. Need ${total_cost:,.2f}, have ${account["cash"]:,.2f}'
                     }
 
             # Execute trade
-            timestamp = datetime.now().isoformat()
+            timestamp = now_et().isoformat()
             pnl = 0.0
 
             # Update positions and calculate P&L for sells
@@ -235,7 +236,7 @@ class PaperTradingBot:
         Returns:
             P&L for the trade (0.0 for buys, calculated value for sells)
         """
-        timestamp = datetime.now().isoformat()
+        timestamp = now_et().isoformat()
         pnl = 0.0
 
         # Get current position
@@ -246,21 +247,21 @@ class PaperTradingBot:
         )
 
         if position:
-            current_qty = position['quantity']
-            current_avg = position['entry_price']
+            current_qty = int(position['quantity'])
+            current_avg = float(position['entry_price'])
 
             if side == 'buy':
-                # Add to position
+                # Add to position (cents arithmetic for average price)
                 new_qty = current_qty + quantity
-                new_avg = ((current_avg * current_qty) + (price * quantity)) / new_qty
+                new_avg = calc_avg_price(current_avg, current_qty, price, quantity)
 
                 self.db.execute(
                     "UPDATE positions SET quantity = %s, entry_price = %s, last_updated = %s WHERE symbol = %s",
                     (new_qty, new_avg, timestamp, symbol)
                 )
             else:  # sell
-                # Calculate P&L: (sell_price - entry_price) * quantity
-                pnl = (price - current_avg) * quantity
+                # Calculate P&L via cents
+                pnl = calc_pnl(price, current_avg, quantity)
 
                 # Reduce position
                 new_qty = current_qty - quantity
@@ -284,13 +285,13 @@ class PaperTradingBot:
         return pnl
 
     def _update_account_cash(self, amount: float):
-        """Update account cash balance"""
+        """Update account cash balance (cents arithmetic)"""
         account = self.get_account()
-        new_cash = account['cash'] + amount
+        new_cash = to_dollars(to_cents(account['cash']) + to_cents(amount))
 
         self.db.execute(
             "UPDATE account SET cash = %s, last_updated = %s",
-            (new_cash, datetime.now().isoformat())
+            (new_cash, now_et().isoformat())
         )
 
     def update_market_data(self):
@@ -402,7 +403,7 @@ class PaperTradingBot:
                     confidence, market_price, action_taken, timestamp)
                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
                 (strategy_id, symbol, signal_type, reason, confidence,
-                 price, action_taken, datetime.now().isoformat())
+                 price, action_taken, now_et().isoformat())
             )
         except Exception as e:
             print(f"[BOT] Warning: Could not log signal: {e}")
