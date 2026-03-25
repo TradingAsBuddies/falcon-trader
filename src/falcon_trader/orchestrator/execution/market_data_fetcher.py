@@ -1,11 +1,14 @@
 """
 Market Data Fetcher
 
-Fetches historical prices and volumes for strategy engines
+Fetches historical prices and volumes for strategy engines.
 Supports multiple data sources:
-- Polygon.io (real-time and historical)
+- Polygon.io (real-time and historical, minute and daily bars)
 - Flat files (local CSV storage)
 - yfinance (fallback)
+
+For intraday strategies, request interval='1' (minute) or '5' (5-min).
+For swing/daily strategies, request interval='day'.
 """
 import os
 import sys
@@ -18,6 +21,22 @@ from typing import Dict, List, Optional, Tuple
 from falcon_trader.orchestrator.utils.timezone import now_et
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+
+# Map human-readable intervals to Polygon API multiplier/timespan
+INTERVAL_MAP = {
+    '1m':    ('1', 'minute'),
+    '1min':  ('1', 'minute'),
+    'minute': ('1', 'minute'),
+    '5m':    ('5', 'minute'),
+    '5min':  ('5', 'minute'),
+    '15m':   ('15', 'minute'),
+    '1h':    ('1', 'hour'),
+    '1d':    ('1', 'day'),
+    'day':   ('1', 'day'),
+    'daily': ('1', 'day'),
+}
+
+DEFAULT_INTERVAL = '1m'
 
 
 class MarketDataFetcher:
@@ -42,34 +61,39 @@ class MarketDataFetcher:
         self.source = self.data_config.get('market_data', 'polygon')
 
         # Get API keys
-        self.polygon_api_key = os.getenv('MASSIVE_API_KEY', '')
+        self.polygon_api_key = os.getenv('MASSIVE_API_KEY', '') or os.getenv('POLYGON_API_KEY', '')
 
         # Flat files path
         self.flat_files_path = 'market_data/daily_bars'
 
-    def fetch_market_data(self, symbol: str, lookback_days: int = 30) -> Dict:
+    def fetch_market_data(self, symbol: str, lookback_days: int = 30,
+                          interval: str = DEFAULT_INTERVAL) -> Dict:
         """
         Fetch market data for a symbol
 
         Args:
             symbol: Stock symbol
             lookback_days: Number of days of historical data
+            interval: Bar interval — '1m', '5m', '15m', '1h', '1d'
+                      Defaults to 1-minute bars for intraday trading.
 
         Returns:
             Dict with:
-                - 'price': Current price
-                - 'prices': Historical prices (list, most recent last)
-                - 'volume': Current volume
+                - 'price': Current/most recent price
+                - 'prices': Historical close prices (list, most recent last)
+                - 'volume': Current/most recent volume
                 - 'volumes': Historical volumes (list, most recent last)
+                - 'timestamps': Bar timestamps (list, most recent last)
                 - 'source': Data source used
+                - 'interval': Interval used
         """
         # Try primary source
         if self.source == 'polygon' and self.polygon_api_key:
-            data = self._fetch_from_polygon(symbol, lookback_days)
+            data = self._fetch_from_polygon(symbol, lookback_days, interval)
             if data:
                 return data
 
-        # Try flat files
+        # Try flat files (daily only for now)
         if self.source == 'flatfiles' or not self.polygon_api_key:
             data = self._fetch_from_flatfiles(symbol, lookback_days)
             if data:
@@ -77,7 +101,7 @@ class MarketDataFetcher:
 
         # Try yfinance fallback
         if self.data_config.get('use_yfinance_fallback', True):
-            data = self._fetch_from_yfinance(symbol, lookback_days)
+            data = self._fetch_from_yfinance(symbol, lookback_days, interval)
             if data:
                 return data
 
@@ -87,32 +111,39 @@ class MarketDataFetcher:
             'prices': [],
             'volume': 0,
             'volumes': [],
+            'timestamps': [],
             'source': 'none',
+            'interval': interval,
             'error': 'No data source available'
         }
 
-    def _fetch_from_polygon(self, symbol: str, lookback_days: int) -> Optional[Dict]:
+    def _fetch_from_polygon(self, symbol: str, lookback_days: int,
+                            interval: str = DEFAULT_INTERVAL) -> Optional[Dict]:
         """
         Fetch data from Polygon.io
 
         Args:
             symbol: Stock symbol
             lookback_days: Number of days
+            interval: Bar interval ('1m', '5m', '1d', etc.)
 
         Returns:
             Market data dict or None
         """
         try:
-            # Calculate date range (Eastern time so we align with US market days)
-            end_date = now_et()
-            start_date = end_date - timedelta(days=lookback_days + 5)  # Extra buffer
+            multiplier, timespan = INTERVAL_MAP.get(interval, ('1', 'minute'))
 
-            # Format dates for Polygon API
+            # Calculate date range (Eastern time to align with US market days)
+            end_date = now_et()
+            start_date = end_date - timedelta(days=lookback_days + 5)
+
             from_date = start_date.strftime('%Y-%m-%d')
             to_date = end_date.strftime('%Y-%m-%d')
 
-            # Fetch aggregates (daily bars)
-            url = f"https://api.polygon.io/v2/aggs/ticker/{symbol}/range/1/day/{from_date}/{to_date}"
+            url = (
+                f"https://api.polygon.io/v2/aggs/ticker/{symbol}"
+                f"/range/{multiplier}/{timespan}/{from_date}/{to_date}"
+            )
             params = {
                 'adjusted': 'true',
                 'sort': 'asc',
@@ -120,7 +151,7 @@ class MarketDataFetcher:
                 'apiKey': self.polygon_api_key
             }
 
-            response = requests.get(url, params=params, timeout=10)
+            response = requests.get(url, params=params, timeout=15)
 
             if response.status_code == 200:
                 data = response.json()
@@ -128,11 +159,10 @@ class MarketDataFetcher:
                 if data.get('status') in ('OK', 'DELAYED') and data.get('results'):
                     results = data['results']
 
-                    # Extract prices and volumes
-                    prices = [r['c'] for r in results]  # Close prices
-                    volumes = [r['v'] for r in results]  # Volumes
+                    prices = [r['c'] for r in results]
+                    volumes = [r['v'] for r in results]
+                    timestamps = [r['t'] for r in results]  # epoch ms
 
-                    # Get current (most recent) values
                     current_price = prices[-1] if prices else 0.0
                     current_volume = volumes[-1] if volumes else 0
 
@@ -141,7 +171,10 @@ class MarketDataFetcher:
                         'prices': prices,
                         'volume': current_volume,
                         'volumes': volumes,
-                        'source': 'polygon'
+                        'timestamps': timestamps,
+                        'source': 'polygon',
+                        'interval': interval,
+                        'bars': len(results),
                     }
 
         except Exception as e:
@@ -203,7 +236,9 @@ class MarketDataFetcher:
                     'prices': prices,
                     'volume': volumes[-1] if volumes else 0,
                     'volumes': volumes,
-                    'source': 'flatfiles'
+                    'timestamps': [],
+                    'source': 'flatfiles',
+                    'interval': '1d',
                 }
 
         except Exception as e:
@@ -211,13 +246,15 @@ class MarketDataFetcher:
 
         return None
 
-    def _fetch_from_yfinance(self, symbol: str, lookback_days: int) -> Optional[Dict]:
+    def _fetch_from_yfinance(self, symbol: str, lookback_days: int,
+                             interval: str = DEFAULT_INTERVAL) -> Optional[Dict]:
         """
         Fetch data from yfinance (fallback)
 
         Args:
             symbol: Stock symbol
             lookback_days: Number of days
+            interval: Bar interval
 
         Returns:
             Market data dict or None
@@ -225,37 +262,40 @@ class MarketDataFetcher:
         try:
             import yfinance as yf
 
-            # Fetch data
-            ticker = yf.Ticker(symbol)
+            # Map interval for yfinance
+            yf_interval_map = {
+                '1m': '1m', '1min': '1m', 'minute': '1m',
+                '5m': '5m', '5min': '5m',
+                '15m': '15m',
+                '1h': '1h',
+                '1d': '1d', 'day': '1d', 'daily': '1d',
+            }
+            yf_interval = yf_interval_map.get(interval, '1d')
 
-            # Get current/intraday price first (most recent data)
-            current_df = ticker.history(period='1d')
-            current_price = None
-            current_volume = None
+            # yfinance limits intraday history
+            if yf_interval in ('1m',) and lookback_days > 7:
+                lookback_days = 7
+            elif yf_interval in ('5m', '15m') and lookback_days > 60:
+                lookback_days = 60
 
-            if not current_df.empty:
-                current_price = current_df['Close'].iloc[-1]
-                current_volume = current_df['Volume'].iloc[-1]
-
-            # Get historical daily data (Eastern time for US market alignment)
             end_date = now_et()
             start_date = end_date - timedelta(days=lookback_days + 5)
-            hist_df = ticker.history(start=start_date, end=end_date)
+
+            ticker = yf.Ticker(symbol)
+            hist_df = ticker.history(start=start_date, end=end_date, interval=yf_interval)
 
             if not hist_df.empty:
                 prices = hist_df['Close'].tolist()
                 volumes = hist_df['Volume'].tolist()
 
-                # Use intraday price if available, otherwise use last historical
-                final_price = current_price if current_price else (prices[-1] if prices else 0.0)
-                final_volume = current_volume if current_volume else (volumes[-1] if volumes else 0)
-
                 return {
-                    'price': final_price,
+                    'price': prices[-1] if prices else 0.0,
                     'prices': prices,
-                    'volume': final_volume,
+                    'volume': volumes[-1] if volumes else 0,
                     'volumes': volumes,
-                    'source': 'yfinance'
+                    'timestamps': [],
+                    'source': 'yfinance',
+                    'interval': interval,
                 }
 
         except ImportError:
@@ -267,7 +307,7 @@ class MarketDataFetcher:
 
     def get_current_price(self, symbol: str) -> float:
         """
-        Get current price for a symbol
+        Get current price for a symbol (latest minute bar)
 
         Args:
             symbol: Stock symbol
@@ -275,12 +315,12 @@ class MarketDataFetcher:
         Returns:
             Current price or 0.0 if unavailable
         """
-        data = self.fetch_market_data(symbol, lookback_days=1)
+        data = self.fetch_market_data(symbol, lookback_days=1, interval='1m')
         return data.get('price', 0.0)
 
     def get_quote(self, symbol: str) -> Dict:
         """
-        Get current quote for a symbol (compatible with paper_trading_bot)
+        Get current quote for a symbol (latest minute bar)
 
         Args:
             symbol: Stock symbol
@@ -288,13 +328,14 @@ class MarketDataFetcher:
         Returns:
             Dict with quote data
         """
-        data = self.fetch_market_data(symbol, lookback_days=1)
+        data = self.fetch_market_data(symbol, lookback_days=1, interval='1m')
 
         return {
             'symbol': symbol,
             'price': data.get('price', 0.0),
             'volume': data.get('volume', 0),
-            'source': data.get('source', 'none')
+            'source': data.get('source', 'none'),
+            'interval': data.get('interval', '1m'),
         }
 
     def validate_data_quality(self, market_data: Dict, min_periods: int = 20) -> Tuple[bool, str]:

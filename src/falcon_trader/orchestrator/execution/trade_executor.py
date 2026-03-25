@@ -98,8 +98,12 @@ class TradeExecutor:
             print("=" * 60)
 
             # Step 1: Fetch market data (needed for routing and signal generation)
-            print(f"[STEP 1] Fetching market data...")
-            market_data = self.data_fetcher.fetch_market_data(symbol, lookback_days=30)
+            # Use minute bars for intraday trading; configurable via data_sources
+            interval = self.config.get('data_sources', {}).get('interval', '1m')
+            print(f"[STEP 1] Fetching market data ({interval} bars)...")
+            market_data = self.data_fetcher.fetch_market_data(
+                symbol, lookback_days=30, interval=interval,
+            )
 
             if not market_data or market_data.get('error'):
                 result['reason'] = f"Failed to fetch market data: {market_data.get('error', 'Unknown error')}"
@@ -107,7 +111,7 @@ class TradeExecutor:
                 return result
 
             print(f"  Current Price: ${market_data['price']:.2f}")
-            print(f"  Data Points: {len(market_data['prices'])}")
+            print(f"  Bars: {len(market_data['prices'])} ({market_data.get('interval', interval)})")
             print(f"  Source: {market_data['source']}")
 
             # Validate data quality
@@ -266,8 +270,11 @@ class TradeExecutor:
                     strategy = 'unknown'
 
                 try:
-                    # Fetch current market data
-                    market_data = self.data_fetcher.fetch_market_data(symbol, lookback_days=30)
+                    # Fetch current market data (minute bars for intraday monitoring)
+                    interval = self.config.get('data_sources', {}).get('interval', '1m')
+                    market_data = self.data_fetcher.fetch_market_data(
+                        symbol, lookback_days=5, interval=interval,
+                    )
 
                     if not market_data or market_data.get('error'):
                         print(f"[WARNING] Could not fetch data for {symbol}")
