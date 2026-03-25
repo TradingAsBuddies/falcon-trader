@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Falcon Sentinels</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #e4e4e4;
+        }
+        .container { max-width: 900px; margin: 0 auto; padding: 2rem; }
+
+        header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding-bottom: 1.5rem;
+            border-bottom: 1px solid #333;
+            margin-bottom: 1.5rem;
+        }
+        header h1 { font-size: 1.8rem; color: #00d4ff; }
+        .back-link {
+            color: #888;
+            text-decoration: none;
+            font-size: 0.9rem;
+        }
+        .back-link:hover { color: #00d4ff; }
+
+        .summary {
+            display: flex;
+            gap: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+        .summary-card {
+            flex: 1;
+            background: rgba(255,255,255,0.05);
+            border-radius: 10px;
+            padding: 1.2rem;
+            text-align: center;
+            border: 1px solid #333;
+        }
+        .summary-card .count {
+            font-size: 2rem;
+            font-weight: 700;
+        }
+        .summary-card .label {
+            font-size: 0.8rem;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .count-pass { color: #6bcb77; }
+        .count-warn { color: #ffd93d; }
+        .count-fail { color: #ff6b6b; }
+        .count-total { color: #00d4ff; }
+
+        .controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+        .timestamp { font-size: 0.8rem; color: #666; }
+        .run-btn {
+            background: #00d4ff;
+            color: #1a1a2e;
+            border: none;
+            padding: 0.5rem 1.2rem;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+            font-size: 0.9rem;
+        }
+        .run-btn:hover { background: #00b8e6; }
+        .run-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .sentinel-list { display: flex; flex-direction: column; gap: 0.75rem; }
+
+        .sentinel-row {
+            background: rgba(255,255,255,0.04);
+            border-radius: 8px;
+            padding: 1rem 1.2rem;
+            border: 1px solid #333;
+            display: grid;
+            grid-template-columns: 2.5rem 1fr auto;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .status-icon {
+            width: 2rem;
+            height: 2rem;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 0.9rem;
+        }
+        .status-pass { background: rgba(107,203,119,0.2); color: #6bcb77; }
+        .status-warn { background: rgba(255,217,61,0.2); color: #ffd93d; }
+        .status-fail { background: rgba(255,107,107,0.2); color: #ff6b6b; }
+        .status-skip { background: rgba(136,136,136,0.2); color: #888; }
+
+        .sentinel-info h3 {
+            font-size: 1rem;
+            color: #fff;
+            margin-bottom: 0.25rem;
+        }
+        .sentinel-info .reason {
+            font-size: 0.85rem;
+            color: #aaa;
+        }
+
+        .sentinel-meta {
+            text-align: right;
+            font-size: 0.8rem;
+            color: #666;
+            white-space: nowrap;
+        }
+
+        .details-toggle {
+            background: transparent;
+            border: 1px solid #444;
+            color: #888;
+            padding: 0.2rem 0.6rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.75rem;
+            margin-top: 0.5rem;
+        }
+        .details-toggle:hover { border-color: #00d4ff; color: #00d4ff; }
+
+        .details-panel {
+            display: none;
+            grid-column: 1 / -1;
+            background: rgba(0,0,0,0.2);
+            border-radius: 6px;
+            padding: 0.75rem 1rem;
+            margin-top: 0.5rem;
+            font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+            font-size: 0.8rem;
+            color: #aaa;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .details-panel.open { display: block; }
+
+        .loading-state {
+            text-align: center;
+            padding: 3rem;
+            color: #00d4ff;
+        }
+        .spinner {
+            display: inline-block;
+            width: 1.5rem;
+            height: 1.5rem;
+            border: 2px solid #333;
+            border-top-color: #00d4ff;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin-bottom: 0.5rem;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Sentinels</h1>
+            <a href="/" class="back-link">Falcon Home</a>
+        </header>
+
+        <div class="summary">
+            <div class="summary-card">
+                <div class="count count-total" id="total-count">-</div>
+                <div class="label">Total</div>
+            </div>
+            <div class="summary-card">
+                <div class="count count-pass" id="pass-count">-</div>
+                <div class="label">Passed</div>
+            </div>
+            <div class="summary-card">
+                <div class="count count-warn" id="warn-count">-</div>
+                <div class="label">Warnings</div>
+            </div>
+            <div class="summary-card">
+                <div class="count count-fail" id="fail-count">-</div>
+                <div class="label">Failed</div>
+            </div>
+        </div>
+
+        <div class="controls">
+            <span class="timestamp" id="run-timestamp"></span>
+            <button class="run-btn" id="run-btn" onclick="runSentinels()">Run Sentinels</button>
+        </div>
+
+        <div id="sentinel-list" class="sentinel-list">
+            <div class="loading-state" id="loading">
+                <div class="spinner"></div>
+                <div>Running sentinels...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const STATUS_ICONS = {
+            pass: { symbol: '\u2713', cls: 'status-pass' },
+            warn: { symbol: '!',      cls: 'status-warn' },
+            fail: { symbol: '\u2717', cls: 'status-fail' },
+            skip: { symbol: '-',      cls: 'status-skip' },
+        };
+
+        function renderResults(data) {
+            const list = document.getElementById('sentinel-list');
+            const results = data.results || [];
+
+            // Summary
+            const passed = results.filter(r => r.status === 'pass').length;
+            const warned = results.filter(r => r.status === 'warn').length;
+            const failed = results.filter(r => r.status === 'fail').length;
+
+            document.getElementById('total-count').textContent = results.length;
+            document.getElementById('pass-count').textContent = passed;
+            document.getElementById('warn-count').textContent = warned;
+            document.getElementById('fail-count').textContent = failed;
+            document.getElementById('run-timestamp').textContent = 'Last run: ' + new Date().toLocaleTimeString();
+
+            // Rows
+            list.innerHTML = results.map((r, i) => {
+                const icon = STATUS_ICONS[r.status] || STATUS_ICONS.skip;
+                const hasDetails = r.details && Object.keys(r.details).length > 0;
+                const detailsJson = hasDetails ? JSON.stringify(r.details, null, 2) : '';
+
+                return `
+                    <div class="sentinel-row">
+                        <div class="status-icon ${icon.cls}">${icon.symbol}</div>
+                        <div class="sentinel-info">
+                            <h3>${r.name}</h3>
+                            <div class="reason">${r.reason}</div>
+                            ${hasDetails ? `<button class="details-toggle" onclick="toggleDetails(${i})">details</button>` : ''}
+                        </div>
+                        <div class="sentinel-meta">${r.elapsed_ms.toFixed(0)}ms</div>
+                        ${hasDetails ? `<div class="details-panel" id="details-${i}">${detailsJson}</div>` : ''}
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function toggleDetails(idx) {
+            const panel = document.getElementById('details-' + idx);
+            if (panel) panel.classList.toggle('open');
+        }
+
+        async function runSentinels() {
+            const btn = document.getElementById('run-btn');
+            const list = document.getElementById('sentinel-list');
+
+            btn.disabled = true;
+            btn.textContent = 'Running...';
+            list.innerHTML = '<div class="loading-state"><div class="spinner"></div><div>Running sentinels...</div></div>';
+
+            try {
+                const resp = await fetch('/api/sentinels');
+                const data = await resp.json();
+
+                if (data.error) {
+                    list.innerHTML = `<div class="loading-state" style="color:#ff6b6b">Error: ${data.error}</div>`;
+                } else {
+                    renderResults(data);
+                }
+            } catch (err) {
+                list.innerHTML = `<div class="loading-state" style="color:#ff6b6b">Failed to reach API: ${err.message}</div>`;
+            }
+
+            btn.disabled = false;
+            btn.textContent = 'Run Sentinels';
+        }
+
+        // Auto-run on page load
+        runSentinels();
+    </script>
+</body>
+</html>

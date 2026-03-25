@@ -75,6 +75,29 @@ def health():
     """Health check endpoint for container orchestration"""
     return jsonify({"status": "healthy", "service": "falcon-trading"}), 200
 
+
+@app.route('/api/sentinels')
+def api_sentinels():
+    """Run all sentinels and return results as JSON"""
+    try:
+        from falcon_core.sentinel import SentinelRunner
+        runner = SentinelRunner()
+        results = runner.run_all()
+        passed = sum(1 for r in results if r.status.value == "pass")
+        return jsonify({
+            "total": len(results),
+            "passed": passed,
+            "results": [r.to_dict() for r in results],
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/sentinels')
+def serve_sentinels():
+    """Serve the sentinels dashboard"""
+    return send_file('www/sentinels.html')
+
 @app.route('/api/account')
 def get_account():
     """Get current account information"""
