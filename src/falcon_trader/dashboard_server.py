@@ -165,7 +165,7 @@ def api_market_news():
 
     for feed_url, source in feeds:
         try:
-            resp = _requests.get(feed_url, timeout=10)
+            resp = _requests.get(feed_url, timeout=10, headers={'User-Agent': 'Falcon Trading Platform'})
             if resp.status_code != 200:
                 continue
             root = ET.fromstring(resp.content)
