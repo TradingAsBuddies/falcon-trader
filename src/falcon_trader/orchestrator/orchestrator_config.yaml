@@ -39,6 +39,7 @@ sector_routing:
 strategies:
   rsi_mean_reversion:
     enabled: true
+    interval: "5m"              # Bar interval for this strategy
     rsi_period: 14              # RSI calculation period
     rsi_oversold: 45            # Buy threshold (oversold)
     rsi_overbought: 55          # Sell threshold (overbought)
@@ -48,6 +49,7 @@ strategies:
 
   momentum_breakout:
     enabled: true
+    interval: "1m"              # Bar interval for this strategy
     breakout_period: 20         # Resistance calculation period
     volume_multiplier: 1.5      # Volume must be 1.5x average
     ma_fast: 5                  # Fast moving average
@@ -59,6 +61,7 @@ strategies:
 
   bollinger_mean_reversion:
     enabled: true
+    interval: "5m"              # Bar interval for this strategy
     bb_period: 20               # Bollinger Bands period
     bb_std: 2.0                 # Standard deviations
     profit_target: 0.04         # 4% profit target

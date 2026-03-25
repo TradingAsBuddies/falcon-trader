@@ -97,21 +97,49 @@ class TradeExecutor:
             print(f"\n[EXECUTOR] Processing {symbol}")
             print("=" * 60)
 
-            # Step 1: Fetch market data (needed for routing and signal generation)
-            # Use minute bars for intraday trading; configurable via data_sources
-            interval = self.config.get('data_sources', {}).get('interval', '1m')
-            print(f"[STEP 1] Fetching market data ({interval} bars)...")
-            market_data = self.data_fetcher.fetch_market_data(
-                symbol, lookback_days=30, interval=interval,
+            # Step 1: Quick daily fetch for routing classification
+            print(f"[STEP 1] Classifying stock...")
+            daily_data = self.data_fetcher.fetch_market_data(
+                symbol, lookback_days=30, interval='1d',
             )
 
-            if not market_data or market_data.get('error'):
-                result['reason'] = f"Failed to fetch market data: {market_data.get('error', 'Unknown error')}"
+            if not daily_data or daily_data.get('error'):
+                result['reason'] = f"Failed to fetch market data: {daily_data.get('error', 'Unknown error')}"
                 print(f"  [ERROR] {result['reason']}")
                 return result
 
-            print(f"  Current Price: ${market_data['price']:.2f}")
-            print(f"  Bars: {len(market_data['prices'])} ({market_data.get('interval', interval)})")
+            # Route to strategy using daily data (price + volatility classification)
+            routing_decision = self.router.route_with_market_data(symbol, daily_data)
+
+            print(f"  Strategy: {routing_decision.selected_strategy}")
+            print(f"  Classification: {routing_decision.classification}")
+            print(f"  Confidence: {routing_decision.confidence:.1%}")
+            print(f"  Volatility: {routing_decision.profile.volatility:.1%}")
+
+            result['details']['routing'] = {
+                'strategy': routing_decision.selected_strategy,
+                'classification': routing_decision.classification,
+                'confidence': routing_decision.confidence,
+                'reason': routing_decision.reason
+            }
+
+            # Step 2: Fetch strategy-specific market data at the right interval
+            strategy_name = routing_decision.selected_strategy
+            strategy_config = self.config.get('strategies', {}).get(strategy_name, {})
+            interval = strategy_config.get('interval', '1m')
+
+            print(f"[STEP 2] Fetching {interval} bars for {strategy_name}...")
+            market_data = self.data_fetcher.fetch_market_data(
+                symbol, lookback_days=5, interval=interval,
+            )
+
+            if not market_data or market_data.get('error'):
+                result['reason'] = f"Failed to fetch {interval} data: {market_data.get('error', 'Unknown error')}"
+                print(f"  [ERROR] {result['reason']}")
+                return result
+
+            print(f"  Price: ${market_data['price']:.2f}")
+            print(f"  Bars: {len(market_data['prices'])} ({interval})")
             print(f"  Source: {market_data['source']}")
 
             # Validate data quality
@@ -124,24 +152,9 @@ class TradeExecutor:
             result['details']['market_data'] = {
                 'price': market_data['price'],
                 'volume': market_data.get('volume', 0),
-                'data_points': len(market_data['prices']),
+                'bars': len(market_data['prices']),
+                'interval': interval,
                 'source': market_data['source']
-            }
-
-            # Step 2: Route to strategy using the market data we already have
-            print(f"[STEP 2] Routing to strategy...")
-            routing_decision = self.router.route_with_market_data(symbol, market_data)
-
-            print(f"  Strategy: {routing_decision.selected_strategy}")
-            print(f"  Classification: {routing_decision.classification}")
-            print(f"  Confidence: {routing_decision.confidence:.1%}")
-            print(f"  Volatility: {routing_decision.profile.volatility:.1%}")
-
-            result['details']['routing'] = {
-                'strategy': routing_decision.selected_strategy,
-                'classification': routing_decision.classification,
-                'confidence': routing_decision.confidence,
-                'reason': routing_decision.reason
             }
 
             # Step 3: Validate entry
@@ -270,8 +283,10 @@ class TradeExecutor:
                     strategy = 'unknown'
 
                 try:
-                    # Fetch current market data (minute bars for intraday monitoring)
-                    interval = self.config.get('data_sources', {}).get('interval', '1m')
+                    # Fetch current market data at the strategy's interval
+                    engine_key = strategy_map.get(strategy, strategy)
+                    strat_config = self.config.get('strategies', {}).get(engine_key, {})
+                    interval = strat_config.get('interval', '1m')
                     market_data = self.data_fetcher.fetch_market_data(
                         symbol, lookback_days=5, interval=interval,
                     )
