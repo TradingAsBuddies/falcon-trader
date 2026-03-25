@@ -160,6 +160,7 @@ def api_market_news():
     seen_titles = set()
 
     # 1. Polygon.io news (primary — higher quality, ticker-tagged)
+    app.logger.debug(f"[NEWS] api_key={bool(api_key)}, finviz_key={bool(os.environ.get('FINVIZ_AUTH_KEY', ''))}")
     if api_key:
         # General market news + key tickers
         for ticker_param in [None, 'SPY']:
@@ -184,8 +185,11 @@ def api_market_news():
                             'source': r.get('publisher', {}).get('name', 'Polygon'),
                             'tickers': r.get('tickers', []),
                         })
-            except Exception:
+            except Exception as e:
+                app.logger.debug(f"[NEWS] Polygon error ({ticker_param}): {e}")
                 continue
+
+    app.logger.debug(f"[NEWS] After Polygon: {len(articles)} articles")
 
     # 2. Finviz Elite news (premium sources — Bloomberg, CNBC, WSJ)
     finviz_key = os.environ.get('FINVIZ_AUTH_KEY', '')
@@ -221,8 +225,10 @@ def api_market_news():
                         'source': domain,
                         'tickers': [],
                     })
-        except Exception:
-            pass
+        except Exception as e:
+            app.logger.debug(f"[NEWS] Finviz error: {e}")
+
+    app.logger.debug(f"[NEWS] After Finviz: {len(articles)} articles")
 
     # 3. Yahoo Finance RSS (fallback / supplement)
     yahoo_feeds = [
@@ -250,21 +256,35 @@ def api_market_news():
         except Exception:
             continue
 
-    # Sort: Polygon/Yahoo have ISO dates, Finviz has "06:21PM" times.
-    # Polygon articles sort first (full ISO dates), then Finviz (time only),
-    # then Yahoo (RFC 2822 dates). Keep insertion order as tiebreaker.
-    def sort_key(a):
-        pd = a.get('pubDate', '')
+    # Normalize all dates to ISO for consistent sorting.
+    from email.utils import parsedate_to_datetime
+    def to_iso(pd):
+        if not pd:
+            return ''
         # ISO 8601 (Polygon): "2026-03-25T22:00:00Z"
         if 'T' in pd and len(pd) > 10:
             return pd
         # RFC 2822 (Yahoo): "Wed, 25 Mar 2026 22:10:21 +0000"
         if ',' in pd and len(pd) > 20:
-            return pd
+            try:
+                return parsedate_to_datetime(pd).isoformat()
+            except Exception:
+                return pd
         # Time only (Finviz): "06:21PM" — treat as today
-        return ''
+        if ('AM' in pd or 'PM' in pd) and len(pd) < 10:
+            try:
+                from datetime import datetime as _dt
+                t = _dt.strptime(pd.strip(), '%I:%M%p')
+                today = now_et().date()
+                return _dt.combine(today, t.time()).isoformat()
+            except Exception:
+                return ''
+        return pd
 
-    articles.sort(key=sort_key, reverse=True)
+    for a in articles:
+        a['pubDate'] = to_iso(a.get('pubDate', ''))
+
+    articles.sort(key=lambda a: a.get('pubDate', ''), reverse=True)
     articles = articles[:25]
 
     return jsonify({'articles': articles, 'timestamp': now_et().isoformat()})
