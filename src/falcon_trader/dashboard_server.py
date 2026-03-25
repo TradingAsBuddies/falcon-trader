@@ -151,19 +151,48 @@ def api_market():
 
 @app.route('/api/market/news')
 def api_market_news():
-    """Fetch market news from Yahoo Finance RSS feeds"""
+    """Fetch market news from Polygon.io and Yahoo Finance RSS"""
     import xml.etree.ElementTree as ET
     import requests as _requests
 
-    feeds = [
-        ('https://feeds.finance.yahoo.com/rss/2.0/headline?s=SPY&region=US&lang=en-US', 'S&P 500'),
-        ('https://feeds.finance.yahoo.com/rss/2.0/headline?s=^GSPC&region=US&lang=en-US', 'Market'),
-    ]
-
+    api_key = os.environ.get('MASSIVE_API_KEY', '') or os.environ.get('POLYGON_API_KEY', '')
     articles = []
     seen_titles = set()
 
-    for feed_url, source in feeds:
+    # 1. Polygon.io news (primary — higher quality, ticker-tagged)
+    if api_key:
+        # General market news + key tickers
+        for ticker_param in [None, 'SPY']:
+            try:
+                params = {'limit': 10, 'order': 'desc', 'apiKey': api_key}
+                if ticker_param:
+                    params['ticker'] = ticker_param
+                resp = _requests.get(
+                    'https://api.polygon.io/v2/reference/news',
+                    params=params, timeout=10,
+                )
+                if resp.status_code == 200:
+                    for r in resp.json().get('results', []):
+                        title = r.get('title', '')
+                        if title in seen_titles:
+                            continue
+                        seen_titles.add(title)
+                        articles.append({
+                            'title': title,
+                            'link': r.get('article_url', ''),
+                            'pubDate': r.get('published_utc', ''),
+                            'source': r.get('publisher', {}).get('name', 'Polygon'),
+                            'tickers': r.get('tickers', []),
+                        })
+            except Exception:
+                continue
+
+    # 2. Yahoo Finance RSS (fallback / supplement)
+    yahoo_feeds = [
+        ('https://feeds.finance.yahoo.com/rss/2.0/headline?s=SPY&region=US&lang=en-US', 'Yahoo Finance'),
+        ('https://feeds.finance.yahoo.com/rss/2.0/headline?s=^GSPC&region=US&lang=en-US', 'Yahoo Finance'),
+    ]
+    for feed_url, source in yahoo_feeds:
         try:
             resp = _requests.get(feed_url, timeout=10, headers={'User-Agent': 'Falcon Trading Platform'})
             if resp.status_code != 200:
@@ -179,13 +208,14 @@ def api_market_news():
                     'link': item.findtext('link', ''),
                     'pubDate': item.findtext('pubDate', ''),
                     'source': source,
+                    'tickers': [],
                 })
         except Exception:
             continue
 
-    # Sort by pubDate descending (most recent first), limit to 20
-    articles.sort(key=lambda a: a['pubDate'], reverse=True)
-    articles = articles[:20]
+    # Sort by pubDate descending, limit to 25
+    articles.sort(key=lambda a: a.get('pubDate', ''), reverse=True)
+    articles = articles[:25]
 
     return jsonify({'articles': articles, 'timestamp': now_et().isoformat()})
 

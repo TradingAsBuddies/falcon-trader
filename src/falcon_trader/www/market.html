@@ -235,10 +235,12 @@
 
                 const items = data.articles.map(a => {
                     const ago = timeAgo(a.pubDate);
+                    const tickers = (a.tickers && a.tickers.length) ? a.tickers.slice(0, 5).map(t => `<span style="color:#00d4ff">$${t}</span>`).join(' ') + ' ' : '';
+                    const src = a.source ? `<span style="color:#555">${a.source}</span>` : '';
                     return `
                         <li class="news-item">
                             <a href="${a.link}" target="_blank" rel="noopener">${a.title}</a>
-                            <div class="news-meta">${ago}</div>
+                            <div class="news-meta">${tickers}${src} &middot; ${ago}</div>
                         </li>`;
                 }).join('');
 
