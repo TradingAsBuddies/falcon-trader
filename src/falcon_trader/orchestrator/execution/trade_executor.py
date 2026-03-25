@@ -97,23 +97,8 @@ class TradeExecutor:
             print(f"\n[EXECUTOR] Processing {symbol}")
             print("=" * 60)
 
-            # Step 1: Route to strategy
-            print(f"[STEP 1] Routing to strategy...")
-            routing_decision = self.router.route(symbol, use_yfinance=False)
-
-            print(f"  Strategy: {routing_decision.selected_strategy}")
-            print(f"  Classification: {routing_decision.classification}")
-            print(f"  Confidence: {routing_decision.confidence:.1%}")
-
-            result['details']['routing'] = {
-                'strategy': routing_decision.selected_strategy,
-                'classification': routing_decision.classification,
-                'confidence': routing_decision.confidence,
-                'reason': routing_decision.reason
-            }
-
-            # Step 2: Fetch market data
-            print(f"[STEP 2] Fetching market data...")
+            # Step 1: Fetch market data (needed for routing and signal generation)
+            print(f"[STEP 1] Fetching market data...")
             market_data = self.data_fetcher.fetch_market_data(symbol, lookback_days=30)
 
             if not market_data or market_data.get('error'):
@@ -137,6 +122,22 @@ class TradeExecutor:
                 'volume': market_data.get('volume', 0),
                 'data_points': len(market_data['prices']),
                 'source': market_data['source']
+            }
+
+            # Step 2: Route to strategy using the market data we already have
+            print(f"[STEP 2] Routing to strategy...")
+            routing_decision = self.router.route_with_market_data(symbol, market_data)
+
+            print(f"  Strategy: {routing_decision.selected_strategy}")
+            print(f"  Classification: {routing_decision.classification}")
+            print(f"  Confidence: {routing_decision.confidence:.1%}")
+            print(f"  Volatility: {routing_decision.profile.volatility:.1%}")
+
+            result['details']['routing'] = {
+                'strategy': routing_decision.selected_strategy,
+                'classification': routing_decision.classification,
+                'confidence': routing_decision.confidence,
+                'reason': routing_decision.reason
             }
 
             # Step 3: Validate entry

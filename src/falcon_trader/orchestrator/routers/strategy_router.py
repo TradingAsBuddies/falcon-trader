@@ -62,6 +62,41 @@ class StrategyRouter:
             alternatives=alternatives
         )
 
+    def route_with_market_data(self, symbol: str, market_data: dict) -> RoutingDecision:
+        """
+        Route using market data already fetched by the executor.
+
+        Uses price history from Polygon/flat files to classify the stock
+        instead of making a separate yfinance call.
+        """
+        profile = self.classifier.get_profile_from_market_data(symbol, market_data)
+
+        if profile.price == 0.0:
+            return RoutingDecision(
+                symbol=symbol,
+                selected_strategy='rsi_mean_reversion',
+                classification='unknown',
+                reason='No price in market data, using default strategy',
+                confidence=0.50,
+                timestamp=now_et(),
+                profile=profile,
+            )
+
+        strategy, alternatives = self._select_strategy_with_alternatives(profile)
+        reason = self._get_routing_reason(profile, strategy)
+        confidence = self._calculate_confidence(profile, strategy)
+
+        return RoutingDecision(
+            symbol=symbol,
+            selected_strategy=strategy,
+            classification=profile.classification,
+            reason=reason,
+            confidence=confidence,
+            timestamp=now_et(),
+            profile=profile,
+            alternatives=alternatives,
+        )
+
     def _select_strategy_with_alternatives(self, profile: StockProfile) -> tuple:
         """
         Select strategy and calculate alternatives

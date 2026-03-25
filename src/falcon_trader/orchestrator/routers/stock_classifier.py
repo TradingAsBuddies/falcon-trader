@@ -3,6 +3,7 @@ Stock classification for strategy routing
 """
 import sys
 import os
+from typing import Dict, List, Optional
 from falcon_trader.orchestrator.utils.data_structures import StockProfile
 
 
@@ -28,6 +29,43 @@ class StockClassifier:
             return self._get_profile_from_yfinance(symbol)
         else:
             return self._get_mock_profile(symbol)
+
+    def get_profile_from_market_data(self, symbol: str, market_data: Dict) -> StockProfile:
+        """
+        Build a stock profile from market data already fetched by the executor.
+
+        This avoids a separate API call — the executor fetches price history
+        from Polygon/flat files and passes it here for classification.
+
+        Args:
+            symbol: Stock ticker symbol
+            market_data: Dict with 'price', 'prices', 'volume', 'volumes'
+        """
+        import numpy as np
+
+        price = market_data.get('price', 0.0)
+        prices = market_data.get('prices', [])
+
+        # Calculate annualized volatility from daily returns
+        volatility = 0.0
+        if len(prices) > 1:
+            arr = np.array(prices)
+            returns = np.diff(arr) / arr[:-1]
+            volatility = float(np.std(returns) * (252 ** 0.5))
+
+        is_etf = symbol in self.etf_list
+        classification = self._classify(price, volatility, 0.0, is_etf)
+
+        return StockProfile(
+            symbol=symbol,
+            price=price,
+            volatility=volatility,
+            market_cap=0.0,
+            sector='UNKNOWN',
+            is_etf=is_etf,
+            avg_volume=int(np.mean(market_data.get('volumes', [0]))) if market_data.get('volumes') else 0,
+            classification=classification,
+        )
 
     def _get_profile_from_yfinance(self, symbol: str) -> StockProfile:
         """Get profile from yfinance API"""
