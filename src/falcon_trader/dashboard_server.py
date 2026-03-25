@@ -1,7 +1,10 @@
 import os
+import xml.etree.ElementTree as ElementTree
+from urllib.parse import urlparse as _urlparse
 from flask import Flask, jsonify, send_file, request, redirect
 from flask_cors import CORS
 import json
+import requests as http_requests
 import threading
 import time
 from datetime import datetime
@@ -79,7 +82,6 @@ def health():
 @app.route('/api/market')
 def api_market():
     """Current market indicators, top gainers, and top losers"""
-    import requests as _requests
 
     api_key = os.environ.get('MASSIVE_API_KEY', '') or os.environ.get('POLYGON_API_KEY', '')
     if not api_key:
@@ -90,7 +92,7 @@ def api_market():
     for symbol, label in [('SPY', 'S&P 500'), ('TQQQ', 'TQQQ'), ('VIXY', 'VIX (VIXY)'), ('BNO', 'Brent Crude (BNO)')]:
         try:
             url = f"https://api.polygon.io/v2/aggs/ticker/{symbol}/prev"
-            resp = _requests.get(url, params={'adjusted': 'true', 'apiKey': api_key}, timeout=5)
+            resp = http_requests.get(url, params={'adjusted': 'true', 'apiKey': api_key}, timeout=5)
             data = resp.json()
             if data.get('results'):
                 r = data['results'][0]
@@ -114,7 +116,7 @@ def api_market():
     losers = []
     try:
         url = "https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/gainers"
-        resp = _requests.get(url, params={'apiKey': api_key}, timeout=10)
+        resp = http_requests.get(url, params={'apiKey': api_key}, timeout=10)
         if resp.status_code == 200:
             for t in resp.json().get('tickers', [])[:10]:
                 day = t.get('todaysChangePerc', t.get('day', {}))
@@ -129,7 +131,7 @@ def api_market():
 
     try:
         url = "https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/losers"
-        resp = _requests.get(url, params={'apiKey': api_key}, timeout=10)
+        resp = http_requests.get(url, params={'apiKey': api_key}, timeout=10)
         if resp.status_code == 200:
             for t in resp.json().get('tickers', [])[:10]:
                 losers.append({
@@ -151,9 +153,7 @@ def api_market():
 
 @app.route('/api/market/news')
 def api_market_news():
-    """Fetch market news from Polygon.io and Yahoo Finance RSS"""
-    import xml.etree.ElementTree as ET
-    import requests as _requests
+    """Fetch market news from Polygon.io, Finviz Elite, and Yahoo Finance RSS"""
 
     api_key = os.environ.get('MASSIVE_API_KEY', '') or os.environ.get('POLYGON_API_KEY', '')
     articles = []
@@ -167,7 +167,7 @@ def api_market_news():
                 params = {'limit': 10, 'order': 'desc', 'apiKey': api_key}
                 if ticker_param:
                     params['ticker'] = ticker_param
-                resp = _requests.get(
+                resp = http_requests.get(
                     'https://api.polygon.io/v2/reference/news',
                     params=params, timeout=10,
                 )
@@ -192,8 +192,7 @@ def api_market_news():
     if finviz_key:
         try:
             from bs4 import BeautifulSoup
-            from urllib.parse import urlparse
-            resp = _requests.get(
+            resp = http_requests.get(
                 'https://elite.finviz.com/news.ashx',
                 cookies={'finviz_elite': finviz_key},
                 headers={'User-Agent': 'Falcon Trading Platform'},
@@ -211,7 +210,7 @@ def api_market_news():
                     seen_titles.add(title)
                     url = link['href']
                     # Extract source from domain
-                    domain = urlparse(url).netloc.replace('www.', '')
+                    domain = _urlparse(url).netloc.replace('www.', '')
                     # Get time from sibling cell
                     time_cell = cell.find_previous_sibling('td', class_='news_date-cell')
                     time_text = time_cell.get_text(strip=True) if time_cell else ''
@@ -232,10 +231,10 @@ def api_market_news():
     ]
     for feed_url, source in yahoo_feeds:
         try:
-            resp = _requests.get(feed_url, timeout=10, headers={'User-Agent': 'Falcon Trading Platform'})
+            resp = http_requests.get(feed_url, timeout=10, headers={'User-Agent': 'Falcon Trading Platform'})
             if resp.status_code != 200:
                 continue
-            root = ET.fromstring(resp.content)
+            root = ElementTree.fromstring(resp.content)
             for item in root.findall('.//item'):
                 title = item.findtext('title', '')
                 if title in seen_titles:
