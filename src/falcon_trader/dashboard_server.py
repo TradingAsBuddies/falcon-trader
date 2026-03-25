@@ -187,7 +187,45 @@ def api_market_news():
             except Exception:
                 continue
 
-    # 2. Yahoo Finance RSS (fallback / supplement)
+    # 2. Finviz Elite news (premium sources — Bloomberg, CNBC, WSJ)
+    finviz_key = os.environ.get('FINVIZ_AUTH_KEY', '')
+    if finviz_key:
+        try:
+            from bs4 import BeautifulSoup
+            from urllib.parse import urlparse
+            resp = _requests.get(
+                'https://elite.finviz.com/news.ashx',
+                cookies={'finviz_elite': finviz_key},
+                headers={'User-Agent': 'Falcon Trading Platform'},
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                soup = BeautifulSoup(resp.content, 'html.parser')
+                for cell in soup.find_all('td', class_='news_link-cell'):
+                    link = cell.find('a', href=True)
+                    if not link:
+                        continue
+                    title = link.get_text(strip=True)
+                    if title in seen_titles:
+                        continue
+                    seen_titles.add(title)
+                    url = link['href']
+                    # Extract source from domain
+                    domain = urlparse(url).netloc.replace('www.', '')
+                    # Get time from sibling cell
+                    time_cell = cell.find_previous_sibling('td', class_='news_date-cell')
+                    time_text = time_cell.get_text(strip=True) if time_cell else ''
+                    articles.append({
+                        'title': title,
+                        'link': url,
+                        'pubDate': time_text,
+                        'source': domain,
+                        'tickers': [],
+                    })
+        except Exception:
+            pass
+
+    # 3. Yahoo Finance RSS (fallback / supplement)
     yahoo_feeds = [
         ('https://feeds.finance.yahoo.com/rss/2.0/headline?s=SPY&region=US&lang=en-US', 'Yahoo Finance'),
         ('https://feeds.finance.yahoo.com/rss/2.0/headline?s=^GSPC&region=US&lang=en-US', 'Yahoo Finance'),
@@ -213,8 +251,21 @@ def api_market_news():
         except Exception:
             continue
 
-    # Sort by pubDate descending, limit to 25
-    articles.sort(key=lambda a: a.get('pubDate', ''), reverse=True)
+    # Sort: Polygon/Yahoo have ISO dates, Finviz has "06:21PM" times.
+    # Polygon articles sort first (full ISO dates), then Finviz (time only),
+    # then Yahoo (RFC 2822 dates). Keep insertion order as tiebreaker.
+    def sort_key(a):
+        pd = a.get('pubDate', '')
+        # ISO 8601 (Polygon): "2026-03-25T22:00:00Z"
+        if 'T' in pd and len(pd) > 10:
+            return pd
+        # RFC 2822 (Yahoo): "Wed, 25 Mar 2026 22:10:21 +0000"
+        if ',' in pd and len(pd) > 20:
+            return pd
+        # Time only (Finviz): "06:21PM" — treat as today
+        return ''
+
+    articles.sort(key=sort_key, reverse=True)
     articles = articles[:25]
 
     return jsonify({'articles': articles, 'timestamp': now_et().isoformat()})
