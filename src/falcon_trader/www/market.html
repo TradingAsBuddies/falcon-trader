@@ -86,6 +86,40 @@
         td.price-col { color: #ccc; }
         td.vol-col { color: #666; font-size: 0.8rem; }
 
+        /* News section */
+        .news-panel {
+            background: rgba(255,255,255,0.04);
+            border-radius: 10px;
+            padding: 1.2rem;
+            border: 1px solid #333;
+            margin-top: 1.5rem;
+        }
+        .news-panel h2 {
+            font-size: 1rem;
+            color: #00d4ff;
+            margin-bottom: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .news-list { list-style: none; }
+        .news-item {
+            padding: 0.6rem 0;
+            border-bottom: 1px solid #2a2a3e;
+        }
+        .news-item:last-child { border-bottom: none; }
+        .news-item a {
+            color: #e4e4e4;
+            text-decoration: none;
+            font-size: 0.9rem;
+            line-height: 1.4;
+        }
+        .news-item a:hover { color: #00d4ff; }
+        .news-meta {
+            font-size: 0.75rem;
+            color: #555;
+            margin-top: 0.2rem;
+        }
+
         .loading { text-align: center; padding: 3rem; color: #00d4ff; }
         .spinner {
             display: inline-block; width: 1.5rem; height: 1.5rem;
@@ -175,12 +209,57 @@
                     '<div class="movers">' +
                         renderTable(data.gainers, 'Top Gainers', 'up') +
                         renderTable(data.losers, 'Top Losers', 'down') +
-                    '</div>';
+                    '</div>' +
+                    '<div class="news-panel" id="news-panel"><h2>Breaking News</h2><div style="color:#666">Loading news...</div></div>';
+
+                // Fetch news in parallel
+                loadNews();
             } catch (err) {
                 document.getElementById('content').innerHTML = `<div class="loading" style="color:#ff6b6b">Error: ${err.message}</div>`;
             }
 
             btn.disabled = false; btn.textContent = 'Refresh';
+        }
+
+        async function loadNews() {
+            try {
+                const resp = await fetch('/api/market/news');
+                const data = await resp.json();
+                const panel = document.getElementById('news-panel');
+                if (!panel) return;
+
+                if (!data.articles || data.articles.length === 0) {
+                    panel.innerHTML = '<h2>Breaking News</h2><div style="color:#666;padding:1rem">No news available</div>';
+                    return;
+                }
+
+                const items = data.articles.map(a => {
+                    const ago = timeAgo(a.pubDate);
+                    return `
+                        <li class="news-item">
+                            <a href="${a.link}" target="_blank" rel="noopener">${a.title}</a>
+                            <div class="news-meta">${ago}</div>
+                        </li>`;
+                }).join('');
+
+                panel.innerHTML = `<h2>Breaking News</h2><ul class="news-list">${items}</ul>`;
+            } catch (err) {
+                const panel = document.getElementById('news-panel');
+                if (panel) panel.innerHTML = '<h2>Breaking News</h2><div style="color:#ff6b6b">Failed to load news</div>';
+            }
+        }
+
+        function timeAgo(dateStr) {
+            if (!dateStr) return '';
+            const date = new Date(dateStr);
+            const now = new Date();
+            const mins = Math.floor((now - date) / 60000);
+            if (mins < 1) return 'just now';
+            if (mins < 60) return mins + 'm ago';
+            const hrs = Math.floor(mins / 60);
+            if (hrs < 24) return hrs + 'h ago';
+            const days = Math.floor(hrs / 24);
+            return days + 'd ago';
         }
 
         load();

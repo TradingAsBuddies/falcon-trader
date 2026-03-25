@@ -149,6 +149,47 @@ def api_market():
     })
 
 
+@app.route('/api/market/news')
+def api_market_news():
+    """Fetch market news from Yahoo Finance RSS feeds"""
+    import xml.etree.ElementTree as ET
+    import requests as _requests
+
+    feeds = [
+        ('https://feeds.finance.yahoo.com/rss/2.0/headline?s=SPY&region=US&lang=en-US', 'S&P 500'),
+        ('https://feeds.finance.yahoo.com/rss/2.0/headline?s=^GSPC&region=US&lang=en-US', 'Market'),
+    ]
+
+    articles = []
+    seen_titles = set()
+
+    for feed_url, source in feeds:
+        try:
+            resp = _requests.get(feed_url, timeout=10)
+            if resp.status_code != 200:
+                continue
+            root = ET.fromstring(resp.content)
+            for item in root.findall('.//item'):
+                title = item.findtext('title', '')
+                if title in seen_titles:
+                    continue
+                seen_titles.add(title)
+                articles.append({
+                    'title': title,
+                    'link': item.findtext('link', ''),
+                    'pubDate': item.findtext('pubDate', ''),
+                    'source': source,
+                })
+        except Exception:
+            continue
+
+    # Sort by pubDate descending (most recent first), limit to 20
+    articles.sort(key=lambda a: a['pubDate'], reverse=True)
+    articles = articles[:20]
+
+    return jsonify({'articles': articles, 'timestamp': now_et().isoformat()})
+
+
 @app.route('/market')
 def serve_market():
     """Serve the market overview dashboard"""
