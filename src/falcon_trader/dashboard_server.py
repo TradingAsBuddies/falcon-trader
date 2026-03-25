@@ -76,6 +76,85 @@ def health():
     return jsonify({"status": "healthy", "service": "falcon-trading"}), 200
 
 
+@app.route('/api/market')
+def api_market():
+    """Current market indicators, top gainers, and top losers"""
+    import requests as _requests
+
+    api_key = os.environ.get('MASSIVE_API_KEY', '') or os.environ.get('POLYGON_API_KEY', '')
+    if not api_key:
+        return jsonify({"error": "No Polygon API key"}), 503
+
+    # Key market indicators
+    indicators = {}
+    for symbol, label in [('SPY', 'S&P 500'), ('TQQQ', 'TQQQ'), ('VIXY', 'VIX (VIXY)'), ('BNO', 'Brent Crude (BNO)')]:
+        try:
+            url = f"https://api.polygon.io/v2/aggs/ticker/{symbol}/prev"
+            resp = _requests.get(url, params={'adjusted': 'true', 'apiKey': api_key}, timeout=5)
+            data = resp.json()
+            if data.get('results'):
+                r = data['results'][0]
+                prev_close = r.get('c', 0)
+                prev_open = r.get('o', 0)
+                change_pct = ((prev_close - prev_open) / prev_open * 100) if prev_open else 0
+                indicators[symbol] = {
+                    'label': label,
+                    'close': r.get('c', 0),
+                    'open': r.get('o', 0),
+                    'high': r.get('h', 0),
+                    'low': r.get('l', 0),
+                    'volume': r.get('v', 0),
+                    'change_pct': round(change_pct, 2),
+                }
+        except Exception:
+            pass
+
+    # Top gainers and losers from Polygon snapshot
+    gainers = []
+    losers = []
+    try:
+        url = "https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/gainers"
+        resp = _requests.get(url, params={'apiKey': api_key}, timeout=10)
+        if resp.status_code == 200:
+            for t in resp.json().get('tickers', [])[:10]:
+                day = t.get('todaysChangePerc', t.get('day', {}))
+                gainers.append({
+                    'symbol': t.get('ticker', ''),
+                    'price': t.get('day', {}).get('c', t.get('lastTrade', {}).get('p', 0)),
+                    'change_pct': round(t.get('todaysChangePerc', 0), 2),
+                    'volume': t.get('day', {}).get('v', 0),
+                })
+    except Exception:
+        pass
+
+    try:
+        url = "https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/losers"
+        resp = _requests.get(url, params={'apiKey': api_key}, timeout=10)
+        if resp.status_code == 200:
+            for t in resp.json().get('tickers', [])[:10]:
+                losers.append({
+                    'symbol': t.get('ticker', ''),
+                    'price': t.get('day', {}).get('c', t.get('lastTrade', {}).get('p', 0)),
+                    'change_pct': round(t.get('todaysChangePerc', 0), 2),
+                    'volume': t.get('day', {}).get('v', 0),
+                })
+    except Exception:
+        pass
+
+    return jsonify({
+        'indicators': indicators,
+        'gainers': gainers,
+        'losers': losers,
+        'timestamp': now_et().isoformat(),
+    })
+
+
+@app.route('/market')
+def serve_market():
+    """Serve the market overview dashboard"""
+    return send_file('www/market.html')
+
+
 @app.route('/api/sentinels')
 def api_sentinels():
     """Run all sentinels and return results as JSON"""
