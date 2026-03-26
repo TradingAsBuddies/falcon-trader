@@ -169,6 +169,58 @@
             line-height: 1.3;
         }
         .trending-chip:hover .chip-headline { display: block; }
+        .trending-chip.new-entry {
+            animation: pulse 2s ease-in-out 3;
+            border-color: #ffd93d;
+        }
+
+        /* Alert banner */
+        .alerts {
+            margin-bottom: 1rem;
+        }
+        .alert {
+            background: rgba(255,217,61,0.12);
+            border: 1px solid rgba(255,217,61,0.4);
+            border-radius: 8px;
+            padding: 0.6rem 1rem;
+            margin-bottom: 0.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            animation: slideIn 0.3s ease-out;
+        }
+        .alert .alert-icon { font-size: 1.1rem; }
+        .alert .alert-text { font-size: 0.85rem; color: #e4e4e4; flex: 1; }
+        .alert .alert-ticker { color: #00d4ff; font-weight: 700; }
+        .alert .alert-time { font-size: 0.75rem; color: #666; white-space: nowrap; }
+        .alert .alert-dismiss {
+            background: transparent; border: none; color: #666;
+            cursor: pointer; font-size: 1rem; padding: 0 0.3rem;
+        }
+        .alert .alert-dismiss:hover { color: #fff; }
+
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes pulse {
+            0%, 100% { border-color: rgba(255,217,61,0.4); }
+            50% { border-color: #ffd93d; box-shadow: 0 0 8px rgba(255,217,61,0.3); }
+        }
+
+        /* Auto-refresh indicator */
+        .refresh-status {
+            font-size: 0.75rem;
+            color: #555;
+        }
+        .refresh-status .dot {
+            display: inline-block;
+            width: 6px; height: 6px;
+            border-radius: 50%;
+            background: #6bcb77;
+            margin-right: 4px;
+        }
+        .refresh-status .dot.paused { background: #888; }
 
         .news-meta {
             font-size: 0.75rem;
@@ -191,11 +243,14 @@
         <header>
             <h1>Market Overview</h1>
             <div class="header-right">
+                <span class="refresh-status" id="refresh-status"><span class="dot"></span>Auto 60s</span>
                 <span class="timestamp" id="ts"></span>
                 <button class="refresh-btn" id="btn" onclick="load()">Refresh</button>
                 <a href="/" class="back-link">Home</a>
             </div>
         </header>
+
+        <div class="alerts" id="alerts"></div>
 
         <div id="content">
             <div class="loading"><div class="spinner"></div><div>Loading market data...</div></div>
@@ -207,22 +262,91 @@
         function pct(n) { return n >= 0 ? '+' + n.toFixed(2) + '%' : n.toFixed(2) + '%'; }
         function cls(n) { return n > 0 ? 'up' : n < 0 ? 'down' : 'flat'; }
 
+        // State tracking for new-entry alerts
+        let prevGainers = new Set();
+        let prevLosers = new Set();
+        let prevTrending = new Set();
+        let isFirstLoad = true;
+
+        const MARKET_REFRESH_MS = 60 * 1000;   // 60 seconds
+        const NEWS_REFRESH_MS = 5 * 60 * 1000; // 5 minutes
+        const MAX_ALERTS = 8;
+        let marketTimer = null;
+        let newsTimer = null;
+
+        function addAlert(ticker, listName, headline) {
+            const container = document.getElementById('alerts');
+            if (!container) return;
+            // Cap alerts
+            while (container.children.length >= MAX_ALERTS) {
+                container.removeChild(container.lastChild);
+            }
+            const time = new Date().toLocaleTimeString();
+            const el = document.createElement('div');
+            el.className = 'alert';
+            el.innerHTML = `
+                <span class="alert-icon">&#9733;</span>
+                <span class="alert-text"><span class="alert-ticker">$${ticker}</span> appeared in <strong>${listName}</strong>${headline ? ' — ' + headline : ''}</span>
+                <span class="alert-time">${time}</span>
+                <button class="alert-dismiss" onclick="this.parentElement.remove()">&times;</button>
+            `;
+            container.insertBefore(el, container.firstChild);
+        }
+
+        function detectNewEntries(gainers, losers) {
+            if (isFirstLoad) return;
+
+            const curGainers = new Set((gainers || []).map(g => g.symbol));
+            const curLosers = new Set((losers || []).map(l => l.symbol));
+
+            for (const sym of curGainers) {
+                if (!prevGainers.has(sym)) {
+                    const item = gainers.find(g => g.symbol === sym);
+                    addAlert(sym, 'Top Gainers', item ? pct(item.change_pct) : '');
+                }
+            }
+            for (const sym of curLosers) {
+                if (!prevLosers.has(sym)) {
+                    const item = losers.find(l => l.symbol === sym);
+                    addAlert(sym, 'Top Losers', item ? pct(item.change_pct) : '');
+                }
+            }
+
+            prevGainers = curGainers;
+            prevLosers = curLosers;
+        }
+
+        function detectNewTrending(trending) {
+            if (isFirstLoad || !trending) return new Set();
+
+            const curTrending = new Set(trending.map(t => t.ticker));
+            const newTickers = new Set();
+
+            for (const t of trending) {
+                if (!prevTrending.has(t.ticker)) {
+                    addAlert(t.ticker, 'In The News', t.headline.substring(0, 60));
+                    newTickers.add(t.ticker);
+                }
+            }
+
+            prevTrending = curTrending;
+            return newTickers;
+        }
+
         function renderIndicators(indicators) {
             const order = ['SPY', 'TQQQ', 'VIXY', 'BNO'];
             return '<div class="indicators">' + order.map(sym => {
                 const d = indicators[sym];
                 if (!d) return '';
-                // Red-to-green: compare current vs prev_close
-                // Within 1 unit = yellow, above = green, below = red
                 const diff = d.current - d.prev_close;
                 const absDiff = Math.abs(diff);
                 let color;
                 if (absDiff < 1.0) {
-                    color = 'flat';  // yellow
+                    color = 'flat';
                 } else if (diff > 0) {
-                    color = 'up';    // green
+                    color = 'up';
                 } else {
-                    color = 'down';  // red
+                    color = 'down';
                 }
                 return `
                     <div class="indicator-card">
@@ -272,6 +396,9 @@
                 const ts = new Date(data.timestamp);
                 document.getElementById('ts').textContent = ts.toLocaleTimeString() + ' ET';
 
+                // Detect new entries in gainers/losers before rendering
+                detectNewEntries(data.gainers, data.losers);
+
                 document.getElementById('content').innerHTML =
                     renderIndicators(data.indicators) +
                     '<div class="movers">' +
@@ -281,8 +408,13 @@
                     '<div class="trending-panel" id="trending-panel"><h2>In The News</h2><div style="color:#666">Loading...</div></div>' +
                     '<div class="news-panel" id="news-panel"><h2>Breaking News</h2><div style="color:#666">Loading news...</div></div>';
 
-                // Fetch news in parallel
-                loadNews();
+                if (isFirstLoad) {
+                    // Seed initial state
+                    prevGainers = new Set((data.gainers || []).map(g => g.symbol));
+                    prevLosers = new Set((data.losers || []).map(l => l.symbol));
+                    loadNews();
+                    isFirstLoad = false;
+                }
             } catch (err) {
                 document.getElementById('content').innerHTML = `<div class="loading" style="color:#ff6b6b">Error: ${err.message}</div>`;
             }
@@ -315,19 +447,29 @@
 
                 panel.innerHTML = `<h2>Breaking News</h2><ul class="news-list">${items}</ul>`;
 
+                // Detect new trending tickers
+                const newTickers = detectNewTrending(data.trending);
+
                 // Render trending tickers
                 const trendingPanel = document.getElementById('trending-panel');
                 if (trendingPanel && data.trending && data.trending.length > 0) {
-                    const chips = data.trending.map(t => `
-                        <div class="trending-chip">
-                            <span class="ticker-name">$${t.ticker}</span>
-                            <span class="mention-count">${t.mentions}x</span>
-                            <div class="chip-headline">${t.headline}</div>
-                        </div>
-                    `).join('');
+                    const chips = data.trending.map(t => {
+                        const isNew = newTickers.has(t.ticker) ? ' new-entry' : '';
+                        return `
+                            <div class="trending-chip${isNew}">
+                                <span class="ticker-name">$${t.ticker}</span>
+                                <span class="mention-count">${t.mentions}x</span>
+                                <div class="chip-headline">${t.headline}</div>
+                            </div>`;
+                    }).join('');
                     trendingPanel.innerHTML = `<h2>In The News</h2><div class="trending-list">${chips}</div>`;
                 } else if (trendingPanel) {
                     trendingPanel.innerHTML = '';
+                }
+
+                // Seed trending state on first load
+                if (prevTrending.size === 0 && data.trending) {
+                    prevTrending = new Set(data.trending.map(t => t.ticker));
                 }
             } catch (err) {
                 const panel = document.getElementById('news-panel');
@@ -348,7 +490,20 @@
             return days + 'd ago';
         }
 
+        // Initial load
         load();
+
+        // Auto-refresh: market data every 60s, news every 5m
+        marketTimer = setInterval(() => {
+            load();
+        }, MARKET_REFRESH_MS);
+
+        newsTimer = setInterval(() => {
+            loadNews();
+        }, NEWS_REFRESH_MS);
+
+        // Refresh news on the first cycle too (after initial market load)
+        setTimeout(() => loadNews(), MARKET_REFRESH_MS);
     </script>
 </body>
 </html>
