@@ -414,12 +414,15 @@
                     '<div class="news-panel" id="news-panel"><h2>Breaking News</h2><div style="color:#666">Loading news...</div></div>';
 
                 if (isFirstLoad) {
-                    // Seed initial state
+                    // Seed initial state (no alerts on first load)
                     prevGainers = new Set((data.gainers || []).map(g => g.symbol));
                     prevLosers = new Set((data.losers || []).map(l => l.symbol));
-                    loadNews();
                     isFirstLoad = false;
                 }
+
+                // Always reload news after market data renders
+                // (market refresh replaces the DOM, so news panels need repopulating)
+                loadNews();
             } catch (err) {
                 document.getElementById('content').innerHTML = `<div class="loading" style="color:#ff6b6b">Error: ${err.message}</div>`;
             }
