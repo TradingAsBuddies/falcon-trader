@@ -204,7 +204,10 @@ def api_market_news():
             )
             if resp.status_code == 200:
                 soup = BeautifulSoup(resp.content, 'html.parser')
+                finviz_added = 0
                 for cell in soup.find_all('td', class_='news_link-cell'):
+                    if finviz_added >= 15:
+                        break
                     link = cell.find('a', href=True)
                     if not link:
                         continue
@@ -225,6 +228,7 @@ def api_market_news():
                         'source': domain,
                         'tickers': [],
                     })
+                    finviz_added += 1
         except Exception as e:
             app.logger.debug(f"[NEWS] Finviz error: {e}")
 
