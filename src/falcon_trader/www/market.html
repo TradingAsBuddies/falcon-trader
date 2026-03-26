@@ -82,7 +82,8 @@
         table { width: 100%; border-collapse: collapse; }
         th, td { padding: 0.5rem 0.6rem; text-align: left; border-bottom: 1px solid #2a2a3e; font-size: 0.85rem; }
         th { color: #666; font-weight: 600; font-size: 0.75rem; text-transform: uppercase; }
-        td.sym { font-weight: 700; color: #fff; }
+        td.sym { font-weight: 700; }
+        td.sym a { color: #00d4ff; }
         td.price-col { color: #ccc; }
         td.vol-col { color: #666; font-size: 0.8rem; }
 
@@ -139,7 +140,7 @@
             border: 1px solid rgba(0,212,255,0.3);
             border-radius: 6px;
             padding: 0.4rem 0.8rem;
-            cursor: default;
+            cursor: pointer;
             position: relative;
         }
         .trending-chip .ticker-name {
@@ -334,7 +335,7 @@
         }
 
         function tickerLink(sym, text) {
-            return `<a href="/quote/${sym}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none;border-bottom:1px dotted #555">${text || sym}</a>`;
+            return `<a href="/quote/${sym}" target="_blank" rel="noopener" style="color:#00d4ff;text-decoration:underline;text-underline-offset:2px;cursor:pointer">${text || sym}</a>`;
         }
 
         function renderIndicators(indicators) {
