@@ -319,7 +319,51 @@ def api_market_news():
     articles.sort(key=lambda a: a.get('pubDate', ''), reverse=True)
     articles = articles[:30]
 
-    return jsonify({'articles': articles, 'timestamp': now_et().isoformat()})
+    # Build trending tickers from Polygon tags + title extraction
+    import re
+    _TICKER_RE = re.compile(r'\b([A-Z]{1,5})\b')
+    _COMMON_WORDS = {
+        'THE', 'FOR', 'AND', 'ARE', 'BUT', 'NOT', 'YOU', 'ALL', 'CAN', 'HER',
+        'WAS', 'ONE', 'OUR', 'OUT', 'HAS', 'HIS', 'HOW', 'ITS', 'MAY', 'NEW',
+        'NOW', 'OLD', 'SEE', 'WAY', 'WHO', 'DID', 'GET', 'LET', 'SAY', 'SHE',
+        'TOO', 'USE', 'CEO', 'IPO', 'ETF', 'GDP', 'FED', 'SEC', 'FBI', 'DOJ',
+        'USD', 'OIL', 'WAR', 'BUY', 'TOP', 'BIG', 'LOW', 'HIGH', 'DOWN', 'RISE',
+        'FALL', 'BEST', 'SELL', 'YEAR', 'IRAN', 'ASIA', 'AMID', 'SAYS', 'JUST',
+        'MORE', 'THAN', 'THIS', 'WITH', 'FROM', 'THAT', 'BEEN', 'HAVE', 'WILL',
+        'WHAT', 'WHEN', 'YOUR', 'EACH', 'MAKE', 'LIKE', 'LONG', 'LOOK', 'MANY',
+        'SOME', 'THEM', 'THEN', 'VERY', 'OVER', 'SUCH', 'TAKE', 'INTO', 'MOST',
+        'HERE', 'NEAR', 'WEEK', 'LAST', 'NEXT', 'DOES', 'NYSE', 'LIVE', 'ALSO',
+        'BACK', 'KEEP', 'EVEN', 'STILL', 'COULD', 'WOULD', 'AFTER', 'THREE',
+        'THESE', 'FIRST', 'WHERE', 'EVERY', 'BEING', 'ABOUT', 'TRUMP', 'STOCK',
+        'RALLY', 'SURGE', 'EARLY', 'TRADE', 'INDEX',
+    }
+    ticker_mentions = {}
+    for a in articles:
+        tickers = a.get('tickers', [])
+        if not tickers:
+            # Extract potential tickers from title (1-5 uppercase letters)
+            candidates = _TICKER_RE.findall(a.get('title', ''))
+            tickers = [t for t in candidates if t not in _COMMON_WORDS and len(t) >= 2]
+            a['tickers'] = tickers
+        for t in tickers:
+            if t not in ticker_mentions:
+                ticker_mentions[t] = {'count': 0, 'latest_title': ''}
+            ticker_mentions[t]['count'] += 1
+            if not ticker_mentions[t]['latest_title']:
+                ticker_mentions[t]['latest_title'] = a.get('title', '')
+
+    # Sort by mention count, take top 10
+    trending = sorted(ticker_mentions.items(), key=lambda x: -x[1]['count'])[:10]
+    trending_list = [
+        {'ticker': t, 'mentions': info['count'], 'headline': info['latest_title']}
+        for t, info in trending
+    ]
+
+    return jsonify({
+        'articles': articles,
+        'trending': trending_list,
+        'timestamp': now_et().isoformat(),
+    })
 
 
 @app.route('/market')
