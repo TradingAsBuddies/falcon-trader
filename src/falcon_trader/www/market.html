@@ -212,12 +212,24 @@
             return '<div class="indicators">' + order.map(sym => {
                 const d = indicators[sym];
                 if (!d) return '';
-                const c = cls(d.change_pct);
+                // Red-to-green: compare current vs prev_close
+                // Within 1 unit = yellow, above = green, below = red
+                const diff = d.current - d.prev_close;
+                const absDiff = Math.abs(diff);
+                let color;
+                if (absDiff < 1.0) {
+                    color = 'flat';  // yellow
+                } else if (diff > 0) {
+                    color = 'up';    // green
+                } else {
+                    color = 'down';  // red
+                }
                 return `
                     <div class="indicator-card">
                         <div class="label">${d.label}</div>
-                        <div class="price">$${d.close.toFixed(2)}</div>
-                        <div class="change ${c}">${pct(d.change_pct)}</div>
+                        <div class="price ${color}">$${d.current.toFixed(2)}</div>
+                        <div class="change ${color}">${pct(d.change_pct)} (${diff >= 0 ? '+' : ''}${diff.toFixed(2)})</div>
+                        <div class="range" style="color:#666">Prev Close: $${d.prev_close.toFixed(2)}</div>
                         <div class="range">L $${d.low.toFixed(2)} — H $${d.high.toFixed(2)}</div>
                         <div class="vol">Vol: ${fmt(d.volume)}</div>
                     </div>`;

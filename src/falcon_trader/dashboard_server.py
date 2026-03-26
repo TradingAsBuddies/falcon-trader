@@ -87,27 +87,56 @@ def api_market():
     if not api_key:
         return jsonify({"error": "No Polygon API key"}), 503
 
-    # Key market indicators
+    # Key market indicators — prev close as red-to-green line + current price
     indicators = {}
+    today = now_et().strftime('%Y-%m-%d')
     for symbol, label in [('SPY', 'S&P 500'), ('TQQQ', 'TQQQ'), ('VIXY', 'VIX (VIXY)'), ('BNO', 'Brent Crude (BNO)')]:
         try:
-            url = f"https://api.polygon.io/v2/aggs/ticker/{symbol}/prev"
-            resp = http_requests.get(url, params={'adjusted': 'true', 'apiKey': api_key}, timeout=5)
-            data = resp.json()
-            if data.get('results'):
-                r = data['results'][0]
-                prev_close = r.get('c', 0)
-                prev_open = r.get('o', 0)
-                change_pct = ((prev_close - prev_open) / prev_open * 100) if prev_open else 0
-                indicators[symbol] = {
-                    'label': label,
-                    'close': r.get('c', 0),
-                    'open': r.get('o', 0),
-                    'high': r.get('h', 0),
-                    'low': r.get('l', 0),
-                    'volume': r.get('v', 0),
-                    'change_pct': round(change_pct, 2),
-                }
+            # Yesterday's close (the red-to-green line)
+            prev_resp = http_requests.get(
+                f"https://api.polygon.io/v2/aggs/ticker/{symbol}/prev",
+                params={'adjusted': 'true', 'apiKey': api_key}, timeout=5,
+            )
+            prev_data = prev_resp.json()
+            if not prev_data.get('results'):
+                continue
+            prev = prev_data['results'][0]
+            prev_close = prev.get('c', 0)
+
+            # Current price from latest minute bar
+            cur_resp = http_requests.get(
+                f"https://api.polygon.io/v2/aggs/ticker/{symbol}/range/1/minute/{today}/{today}",
+                params={'adjusted': 'true', 'sort': 'desc', 'limit': 1, 'apiKey': api_key},
+                timeout=5,
+            )
+            cur_data = cur_resp.json()
+            cur_results = cur_data.get('results', [])
+
+            if cur_results:
+                current_price = cur_results[0].get('c', prev_close)
+                current_volume = cur_results[0].get('v', 0)
+                today_high = cur_results[0].get('h', current_price)
+                today_low = cur_results[0].get('l', current_price)
+            else:
+                # Market may be closed — use prev close as current
+                current_price = prev_close
+                current_volume = prev.get('v', 0)
+                today_high = prev.get('h', prev_close)
+                today_low = prev.get('l', prev_close)
+
+            change = current_price - prev_close
+            change_pct = (change / prev_close * 100) if prev_close else 0
+
+            indicators[symbol] = {
+                'label': label,
+                'current': current_price,
+                'prev_close': prev_close,
+                'change': round(change, 2),
+                'change_pct': round(change_pct, 2),
+                'high': today_high,
+                'low': today_low,
+                'volume': current_volume,
+            }
         except Exception:
             pass
 
