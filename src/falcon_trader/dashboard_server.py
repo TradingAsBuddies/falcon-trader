@@ -1,14 +1,14 @@
 import os
 import xml.etree.ElementTree as ElementTree
 from urllib.parse import urlparse as _urlparse
-from flask import Flask, jsonify, send_file, request, redirect
+from flask import Flask, jsonify, send_file, request, redirect, make_response
 from flask_cors import CORS
 import json
-import requests as http_requests
 import threading
 import time
 from datetime import datetime
 from falcon_core import get_db_manager, FalconConfig
+from falcon_core.http import http_get
 from falcon_trader.orchestrator.utils.timezone import now_et
 
 # Optional YouTube strategy support
@@ -85,7 +85,6 @@ def quote_redirect(symbol):
     symbol = symbol.upper().strip()
     finviz_key = os.environ.get('FINVIZ_AUTH_KEY', '')
     if finviz_key:
-        from flask import make_response
         resp = make_response(redirect(f'https://elite.finviz.com/quote.ashx?t={symbol}'))
         resp.set_cookie('finviz_elite', finviz_key, domain='.finviz.com', path='/')
         return resp
@@ -106,10 +105,12 @@ def api_market():
     for symbol, label in [('SPY', 'S&P 500'), ('TQQQ', 'TQQQ'), ('VIXY', 'VIX (VIXY)'), ('BNO', 'Brent Crude (BNO)')]:
         try:
             # Yesterday's close (the red-to-green line)
-            prev_resp = http_requests.get(
+            prev_resp = http_get(
                 f"https://api.polygon.io/v2/aggs/ticker/{symbol}/prev",
                 params={'adjusted': 'true', 'apiKey': api_key}, timeout=5,
             )
+            if prev_resp is None:
+                continue
             prev_data = prev_resp.json()
             if not prev_data.get('results'):
                 continue
@@ -117,11 +118,13 @@ def api_market():
             prev_close = prev.get('c', 0)
 
             # Current price from latest minute bar
-            cur_resp = http_requests.get(
+            cur_resp = http_get(
                 f"https://api.polygon.io/v2/aggs/ticker/{symbol}/range/1/minute/{today}/{today}",
                 params={'adjusted': 'true', 'sort': 'desc', 'limit': 1, 'apiKey': api_key},
                 timeout=5,
             )
+            if cur_resp is None:
+                continue
             cur_data = cur_resp.json()
             cur_results = cur_data.get('results', [])
 
@@ -158,8 +161,8 @@ def api_market():
     losers = []
     try:
         url = "https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/gainers"
-        resp = http_requests.get(url, params={'apiKey': api_key}, timeout=10)
-        if resp.status_code == 200:
+        resp = http_get(url, params={'apiKey': api_key}, timeout=10)
+        if resp and resp.status_code == 200:
             for t in resp.json().get('tickers', [])[:10]:
                 day = t.get('todaysChangePerc', t.get('day', {}))
                 gainers.append({
@@ -173,8 +176,8 @@ def api_market():
 
     try:
         url = "https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/losers"
-        resp = http_requests.get(url, params={'apiKey': api_key}, timeout=10)
-        if resp.status_code == 200:
+        resp = http_get(url, params={'apiKey': api_key}, timeout=10)
+        if resp and resp.status_code == 200:
             for t in resp.json().get('tickers', [])[:10]:
                 losers.append({
                     'symbol': t.get('ticker', ''),
@@ -210,11 +213,11 @@ def api_market_news():
                 params = {'limit': 10, 'order': 'desc', 'apiKey': api_key}
                 if ticker_param:
                     params['ticker'] = ticker_param
-                resp = http_requests.get(
+                resp = http_get(
                     'https://api.polygon.io/v2/reference/news',
                     params=params, timeout=10,
                 )
-                if resp.status_code == 200:
+                if resp and resp.status_code == 200:
                     for r in resp.json().get('results', []):
                         title = r.get('title', '')
                         if title in seen_titles:
@@ -238,13 +241,13 @@ def api_market_news():
     if finviz_key:
         try:
             from bs4 import BeautifulSoup
-            resp = http_requests.get(
+            resp = http_get(
                 'https://elite.finviz.com/news.ashx',
                 cookies={'finviz_elite': finviz_key},
                 headers={'User-Agent': 'Falcon Trading Platform'},
                 timeout=10,
             )
-            if resp.status_code == 200:
+            if resp and resp.status_code == 200:
                 soup = BeautifulSoup(resp.content, 'html.parser')
                 finviz_added = 0
                 for cell in soup.find_all('td', class_='news_link-cell'):
@@ -283,8 +286,8 @@ def api_market_news():
     ]
     for feed_url, source in cnbc_feeds:
         try:
-            resp = http_requests.get(feed_url, timeout=10, headers={'User-Agent': 'Falcon Trading Platform'})
-            if resp.status_code != 200:
+            resp = http_get(feed_url, timeout=10, headers={'User-Agent': 'Falcon Trading Platform'})
+            if not resp or resp.status_code != 200:
                 continue
             root = ElementTree.fromstring(resp.content)
             for item in root.findall('.//item'):
@@ -311,8 +314,8 @@ def api_market_news():
     ]
     for feed_url, source in yahoo_feeds:
         try:
-            resp = http_requests.get(feed_url, timeout=10, headers={'User-Agent': 'Falcon Trading Platform'})
-            if resp.status_code != 200:
+            resp = http_get(feed_url, timeout=10, headers={'User-Agent': 'Falcon Trading Platform'})
+            if not resp or resp.status_code != 200:
                 continue
             root = ElementTree.fromstring(resp.content)
             for item in root.findall('.//item'):

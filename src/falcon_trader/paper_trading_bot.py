@@ -6,11 +6,11 @@ Real-time paper trading with Polygon.io market data
 
 import os
 import time
-import requests
 import threading
 from datetime import datetime
 from typing import List, Dict, Optional
 from falcon_core import DatabaseManager, FalconConfig
+from falcon_core.http import http_get
 from falcon_trader.orchestrator.utils.cents import to_cents, to_dollars, calc_cost, calc_pnl, calc_avg_price
 from falcon_trader.orchestrator.utils.timezone import now_et
 
@@ -141,9 +141,9 @@ class PaperTradingBot:
             url = f"https://api.polygon.io/v2/aggs/ticker/{symbol}/prev"
             params = {'adjusted': 'true', 'apiKey': self.massive_api_key}
 
-            response = requests.get(url, params=params, timeout=10)
+            response = http_get(url, params=params, timeout=10)
 
-            if response.status_code == 200:
+            if response and response.status_code == 200:
                 data = response.json()
                 if data.get('status') == 'OK' and data.get('results'):
                     result = data['results'][0]

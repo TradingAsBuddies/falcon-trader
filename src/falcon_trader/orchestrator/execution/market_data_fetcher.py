@@ -12,12 +12,12 @@ For swing/daily strategies, request interval='day'.
 """
 import os
 import sys
-import requests
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
+from falcon_core.http import http_get
 from falcon_trader.orchestrator.utils.timezone import now_et
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
@@ -151,9 +151,9 @@ class MarketDataFetcher:
                 'apiKey': self.polygon_api_key
             }
 
-            response = requests.get(url, params=params, timeout=15)
+            response = http_get(url, params=params, timeout=15)
 
-            if response.status_code == 200:
+            if response and response.status_code == 200:
                 data = response.json()
 
                 if data.get('status') in ('OK', 'DELAYED') and data.get('results'):
