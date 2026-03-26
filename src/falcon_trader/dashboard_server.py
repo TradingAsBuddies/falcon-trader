@@ -261,15 +261,15 @@ def api_market_news():
     def to_iso(pd):
         if not pd:
             return ''
-        # ISO 8601 (Polygon): "2026-03-25T22:00:00Z"
-        if 'T' in pd and len(pd) > 10:
-            return pd
-        # RFC 2822 (Yahoo): "Wed, 25 Mar 2026 22:10:21 +0000"
+        # RFC 2822 (Yahoo): "Wed, 25 Mar 2026 22:10:21 +0000" — check first since it contains 'T' in day names
         if ',' in pd and len(pd) > 20:
             try:
                 return parsedate_to_datetime(pd).isoformat()
             except Exception:
                 return pd
+        # ISO 8601 (Polygon): "2026-03-25T22:00:00Z"
+        if 'T' in pd and len(pd) > 10:
+            return pd
         # Time only (Finviz): "06:21PM" — treat as today
         if ('AM' in pd or 'PM' in pd) and len(pd) < 10:
             try:
