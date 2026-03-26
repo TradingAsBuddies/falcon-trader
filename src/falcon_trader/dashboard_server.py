@@ -79,6 +79,19 @@ def health():
     return jsonify({"status": "healthy", "service": "falcon-trading"}), 200
 
 
+@app.route('/quote/<symbol>')
+def quote_redirect(symbol):
+    """Redirect to Finviz Elite quote page with auth"""
+    symbol = symbol.upper().strip()
+    finviz_key = os.environ.get('FINVIZ_AUTH_KEY', '')
+    if finviz_key:
+        from flask import make_response
+        resp = make_response(redirect(f'https://elite.finviz.com/quote.ashx?t={symbol}'))
+        resp.set_cookie('finviz_elite', finviz_key, domain='.finviz.com', path='/')
+        return resp
+    return redirect(f'https://finviz.com/quote.ashx?t={symbol}')
+
+
 @app.route('/api/market')
 def api_market():
     """Current market indicators, top gainers, and top losers"""

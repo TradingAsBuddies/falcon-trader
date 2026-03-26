@@ -286,7 +286,7 @@
             el.className = 'alert';
             el.innerHTML = `
                 <span class="alert-icon">&#9733;</span>
-                <span class="alert-text"><span class="alert-ticker">$${ticker}</span> appeared in <strong>${listName}</strong>${headline ? ' — ' + headline : ''}</span>
+                <span class="alert-text"><a href="/quote/${ticker}" target="_blank" rel="noopener" class="alert-ticker" style="text-decoration:none">$${ticker}</a> appeared in <strong>${listName}</strong>${headline ? ' — ' + headline : ''}</span>
                 <span class="alert-time">${time}</span>
                 <button class="alert-dismiss" onclick="this.parentElement.remove()">&times;</button>
             `;
@@ -333,6 +333,10 @@
             return newTickers;
         }
 
+        function tickerLink(sym, text) {
+            return `<a href="/quote/${sym}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none;border-bottom:1px dotted #555">${text || sym}</a>`;
+        }
+
         function renderIndicators(indicators) {
             const order = ['SPY', 'TQQQ', 'VIXY', 'BNO'];
             return '<div class="indicators">' + order.map(sym => {
@@ -350,7 +354,7 @@
                 }
                 return `
                     <div class="indicator-card">
-                        <div class="label">${d.label}</div>
+                        <div class="label">${tickerLink(sym, d.label)}</div>
                         <div class="price ${color}">$${d.current.toFixed(2)}</div>
                         <div class="change ${color}">${pct(d.change_pct)} (${diff >= 0 ? '+' : ''}${diff.toFixed(2)})</div>
                         <div class="range" style="color:#666">Prev Close: $${d.prev_close.toFixed(2)}</div>
@@ -364,7 +368,7 @@
             if (!items || items.length === 0) return `<div class="mover-panel"><h2>${label}</h2><div style="color:#666;padding:1rem;text-align:center">Unavailable — may require upgraded Polygon plan</div></div>`;
             const rows = items.map(t => `
                 <tr>
-                    <td class="sym">${t.symbol}</td>
+                    <td class="sym">${tickerLink(t.symbol)}</td>
                     <td class="price-col">$${t.price ? t.price.toFixed(2) : '—'}</td>
                     <td class="${changeClass}">${pct(t.change_pct)}</td>
                     <td class="vol-col">${fmt(t.volume)}</td>
@@ -436,7 +440,7 @@
 
                 const items = data.articles.map(a => {
                     const ago = timeAgo(a.pubDate);
-                    const tickers = (a.tickers && a.tickers.length) ? a.tickers.slice(0, 5).map(t => `<span style="color:#00d4ff">$${t}</span>`).join(' ') + ' ' : '';
+                    const tickers = (a.tickers && a.tickers.length) ? a.tickers.slice(0, 5).map(t => `<a href="/quote/${t}" target="_blank" rel="noopener" style="color:#00d4ff;text-decoration:none">$${t}</a>`).join(' ') + ' ' : '';
                     const src = a.source ? `<span style="color:#555">${a.source}</span>` : '';
                     return `
                         <li class="news-item">
@@ -457,7 +461,9 @@
                         const isNew = newTickers.has(t.ticker) ? ' new-entry' : '';
                         return `
                             <div class="trending-chip${isNew}">
-                                <span class="ticker-name">$${t.ticker}</span>
+                                <a href="/quote/${t.ticker}" target="_blank" rel="noopener" style="text-decoration:none">
+                                    <span class="ticker-name">$${t.ticker}</span>
+                                </a>
                                 <span class="mention-count">${t.mentions}x</span>
                                 <div class="chip-headline">${t.headline}</div>
                             </div>`;
