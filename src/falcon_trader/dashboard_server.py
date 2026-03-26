@@ -230,10 +230,38 @@ def api_market_news():
 
     app.logger.debug(f"[NEWS] After Finviz: {len(articles)} articles")
 
-    # 3. Yahoo Finance RSS (fallback / supplement)
+    # 3. CNBC RSS (24/7 coverage — US + international)
+    cnbc_feeds = [
+        ('https://www.cnbc.com/id/100003114/device/rss/rss.html', 'CNBC'),
+        ('https://www.cnbc.com/id/100727362/device/rss/rss.html', 'CNBC World'),
+    ]
+    for feed_url, source in cnbc_feeds:
+        try:
+            resp = http_requests.get(feed_url, timeout=10, headers={'User-Agent': 'Falcon Trading Platform'})
+            if resp.status_code != 200:
+                continue
+            root = ElementTree.fromstring(resp.content)
+            for item in root.findall('.//item'):
+                title = item.findtext('title', '')
+                if title in seen_titles:
+                    continue
+                seen_titles.add(title)
+                articles.append({
+                    'title': title,
+                    'link': item.findtext('link', ''),
+                    'pubDate': item.findtext('pubDate', ''),
+                    'source': source,
+                    'tickers': [],
+                })
+        except Exception:
+            continue
+
+    # 4. Yahoo Finance RSS (US markets + global indices + commodities)
     yahoo_feeds = [
         ('https://feeds.finance.yahoo.com/rss/2.0/headline?s=SPY&region=US&lang=en-US', 'Yahoo Finance'),
         ('https://feeds.finance.yahoo.com/rss/2.0/headline?s=^GSPC&region=US&lang=en-US', 'Yahoo Finance'),
+        ('https://feeds.finance.yahoo.com/rss/2.0/headline?s=^N225,^HSI,^FTSE&region=US&lang=en-US', 'Yahoo Global'),
+        ('https://feeds.finance.yahoo.com/rss/2.0/headline?s=CL=F,GC=F&region=US&lang=en-US', 'Yahoo Commodities'),
     ]
     for feed_url, source in yahoo_feeds:
         try:
@@ -285,7 +313,7 @@ def api_market_news():
         a['pubDate'] = to_iso(a.get('pubDate', ''))
 
     articles.sort(key=lambda a: a.get('pubDate', ''), reverse=True)
-    articles = articles[:25]
+    articles = articles[:30]
 
     return jsonify({'articles': articles, 'timestamp': now_et().isoformat()})
 
