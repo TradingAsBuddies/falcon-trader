@@ -1834,10 +1834,13 @@ def main():
     try:
         if MASSIVE_API_KEY and MASSIVE_API_KEY != 'YOUR_MASSIVE_API_KEY':
             print("Initializing trading bot...")
+            _syms_env = os.getenv("FALCON_DASHBOARD_SYMBOLS", "SPY,QQQ,AAPL")
+            _symbols = [s.strip().upper() for s in _syms_env.split(",") if s.strip()]
+            print(f"Bot symbol universe ({len(_symbols)}): {_symbols}")
             initialize_bot(
                 massive_api_key=MASSIVE_API_KEY,
                 claude_api_key=CLAUDE_API_KEY,
-                symbols=["SPY", "QQQ", "AAPL"],
+                symbols=_symbols,
                 initial_balance=10000.0
             )
         else:
