@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Falcon Signal / Risk</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #e4e4e4;
+            padding: 1rem;
+        }
+        .container { max-width: 1600px; margin: 0 auto; }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem 0;
+            border-bottom: 1px solid #333;
+            margin-bottom: 1.5rem;
+        }
+        h1 { color: #00d4ff; font-size: 1.8rem; }
+        .nav-links a {
+            color: #00d4ff;
+            text-decoration: none;
+            margin-left: 1.5rem;
+            font-size: 0.9rem;
+        }
+        .nav-links a:hover { text-decoration: underline; }
+
+        .panel {
+            background: rgba(255,255,255,0.05);
+            border-radius: 8px;
+            padding: 1.25rem;
+            border: 1px solid #333;
+            margin-bottom: 1rem;
+        }
+        .panel h2 {
+            color: #00d4ff;
+            font-size: 1rem;
+            margin-bottom: 1rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .panel-controls {
+            display: flex;
+            gap: 0.5rem;
+        }
+        .panel-controls button {
+            background: transparent;
+            border: 1px solid #444;
+            color: #888;
+            padding: 0.25rem 0.75rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            cursor: pointer;
+        }
+        .panel-controls button.active {
+            background: #00d4ff;
+            color: #1a1a2e;
+            border-color: #00d4ff;
+        }
+        .panel-controls button:hover:not(.active) {
+            border-color: #00d4ff;
+            color: #00d4ff;
+        }
+
+        /* Loading & Error */
+        .loading {
+            text-align: center;
+            padding: 3rem;
+            color: #888;
+        }
+        .error { color: #ff6b6b; }
+
+        /* Signal/Risk specific */
+        .controls-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            align-items: center;
+        }
+        #tickerInput {
+            flex: 1;
+            min-width: 240px;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid #444;
+            color: #e4e4e4;
+            padding: 0.5rem 0.75rem;
+            border-radius: 4px;
+            font-size: 0.9rem;
+        }
+        #tickerInput:focus { outline: none; border-color: #00d4ff; }
+        .controls-row button[type="submit"] {
+            background: #00d4ff;
+            color: #1a1a2e;
+            border: none;
+            padding: 0.5rem 1.25rem;
+            border-radius: 4px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .hint { color: #888; font-size: 0.75rem; margin-top: 0.5rem; }
+        .ai-badge { font-size: 0.75rem; color: #888; }
+        .ticker-title { color: #00d4ff; font-size: 1.1rem; }
+        .no-risks { color: #6bcb77; font-size: 0.85rem; }
+        pre.narrative {
+            white-space: pre-wrap;
+            word-break: break-word;
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+            font-size: 0.82rem;
+            line-height: 1.45;
+            color: #cfd4dc;
+            background: rgba(0,0,0,0.2);
+            border-radius: 4px;
+            padding: 0.75rem;
+            margin-top: 0.75rem;
+        }
+
+        .flag { border-left: 4px solid #888; padding: 0.5rem 0.75rem; margin: 0.4rem 0; background: rgba(255,255,255,0.04); border-radius: 4px; }
+        .sev-LOW { border-left-color: #6bcb77; }
+        .sev-MEDIUM { border-left-color: #ffd93d; }
+        .sev-HIGH { border-left-color: #ff6b6b; }
+        .flag .sev-label { font-weight: 600; text-transform: uppercase; font-size: 0.75rem; }
+
+        @media (max-width: 768px) {
+            #tickerInput { min-width: 100%; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Signal / Risk</h1>
+            <nav class="nav-links">
+                <a href="/">Home</a>
+                <a href="/dashboard">Trading</a>
+                <a href="/strategies.html">Strategies</a>
+                <a href="/orchestrator.html">Orchestrator</a>
+                <a href="/analytics">Analytics</a>
+                <a href="/backtest-analytics">Backtests</a>
+                <a href="/advisor">AI Advisor</a>
+            </nav>
+        </header>
+
+        <div class="panel">
+            <h2>
+                Analyze Tickers
+                <span class="ai-badge" id="aiBadge"></span>
+            </h2>
+            <form id="riskForm" onsubmit="runAnalysis(event)">
+                <div class="controls-row">
+                    <input type="text" id="tickerInput" placeholder="e.g. AAPL, TSLA, NVDA" autocomplete="off" />
+                    <div class="panel-controls" id="langToggle">
+                        <button type="button" class="active" data-lang="en" onclick="setLang('en')">EN</button>
+                        <button type="button" data-lang="es" onclick="setLang('es')">ES</button>
+                    </div>
+                    <button type="submit">Analyze</button>
+                </div>
+                <div class="hint">Comma-separated tickers (max 10). Narrative language follows the EN/ES toggle.</div>
+            </form>
+        </div>
+
+        <div id="results"></div>
+    </div>
+
+    <script>
+        let currentLang = 'en';
+
+        function escapeHtml(s) {
+            if (s === null || s === undefined) return '';
+            return String(s)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function setLang(lang) {
+            currentLang = lang;
+            document.querySelectorAll('#langToggle button').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.lang === lang);
+            });
+            // Re-fire the fetch if there is already a query in the input.
+            const input = document.getElementById('tickerInput');
+            if (input && input.value.trim()) {
+                fetchAnalysis(input.value.trim());
+            }
+        }
+
+        async function runAnalysis(event) {
+            if (event) event.preventDefault();
+            const input = document.getElementById('tickerInput');
+            const raw = (input.value || '').trim();
+            if (!raw) {
+                document.getElementById('results').innerHTML =
+                    '<div class="panel error">Enter at least one ticker.</div>';
+                return;
+            }
+            await fetchAnalysis(raw);
+        }
+
+        async function fetchAnalysis(raw) {
+            const results = document.getElementById('results');
+            results.innerHTML = '<div class="loading">Analyzing ' + escapeHtml(raw) + ' ...</div>';
+            try {
+                const url = '/api/risk-analysis?tickers=' + encodeURIComponent(raw) +
+                    '&lang=' + encodeURIComponent(currentLang);
+                const res = await fetch(url);
+                const data = await res.json();
+                if (!res.ok || data.error) {
+                    results.innerHTML = '<div class="panel error">' +
+                        escapeHtml(data.error || ('Request failed (' + res.status + ')')) + '</div>';
+                    return;
+                }
+                render(data);
+            } catch (e) {
+                results.innerHTML = '<div class="panel error">' + escapeHtml(e.message || String(e)) + '</div>';
+            }
+        }
+
+        function render(data) {
+            const results = document.getElementById('results');
+            const badge = document.getElementById('aiBadge');
+            badge.textContent = data.ai_enabled
+                ? 'AI narrative: on (' + (data.lang || 'en').toUpperCase() + ')'
+                : 'AI narrative: off — library fallback (' + (data.lang || 'en').toUpperCase() + ')';
+
+            const rows = Array.isArray(data.results) ? data.results : [];
+            if (rows.length === 0) {
+                results.innerHTML = '<div class="panel">No results.</div>';
+                return;
+            }
+
+            results.innerHTML = rows.map(r => {
+                if (!r.ok) {
+                    return '<div class="panel">' +
+                        '<h2><span class="ticker-title">' + escapeHtml(r.ticker) + '</span></h2>' +
+                        '<div class="error">' + escapeHtml(r.error || 'Unknown error') + '</div>' +
+                        '</div>';
+                }
+
+                let flagsHtml;
+                if (Array.isArray(r.flags) && r.flags.length > 0) {
+                    flagsHtml = r.flags.map(f => {
+                        // Deterministic coloring driven by the severity string from the API.
+                        const sev = String(f.severity || '').toUpperCase();
+                        const cls = (sev === 'LOW' || sev === 'MEDIUM' || sev === 'HIGH')
+                            ? 'sev-' + sev : '';
+                        return '<div class="flag ' + cls + '">' +
+                            '<span class="sev-label">' + escapeHtml(sev || '—') + '</span> ' +
+                            '<strong>' + escapeHtml(f.flag_type) + '</strong>: ' +
+                            escapeHtml(f.message) +
+                            '</div>';
+                    }).join('');
+                } else {
+                    flagsHtml = '<div class="no-risks">No risk flags detected.</div>';
+                }
+
+                const narrative = r.narrative
+                    ? '<pre class="narrative">' + escapeHtml(r.narrative) + '</pre>'
+                    : '';
+
+                return '<div class="panel">' +
+                    '<h2><span class="ticker-title">' + escapeHtml(r.ticker) + '</span>' +
+                    '<span class="ai-badge">' + (r.has_risks ? 'risks flagged' : 'clean') + '</span></h2>' +
+                    flagsHtml +
+                    narrative +
+                    '</div>';
+            }).join('');
+        }
+    </script>
+</body>
+</html>
