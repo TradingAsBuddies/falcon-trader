@@ -36,6 +36,21 @@ except ImportError:
     create_api_routes = None
     BACKTEST_RESULTS_AVAILABLE = False
 
+# DAS Trader CMD-API execution backend (SIM only, dry-run default)
+try:
+    from falcon_trader.das_execution import DASExecutionClient, health_check as das_health_check
+    DAS_AVAILABLE = True
+except ImportError:
+    DASExecutionClient = None
+    das_health_check = None
+    DAS_AVAILABLE = False
+
+# Runtime-mutable config (editable from the website via /api/config — no restart needed).
+# "execution_backend": "das" routes orders through DAStrader (SIM); else the in-memory paper bot.
+RUNTIME_CONFIG = {
+    "execution_backend": os.getenv("FALCON_EXECUTION", "paper").lower(),
+}
+
 # Import your paper trading bot
 # Assuming the previous code is in a file called paper_trading_bot.py
 # from paper_trading_bot import PaperTradingBot, MassiveRealTimeFeed
@@ -48,6 +63,29 @@ bot = None
 
 # Initialize database manager (uses environment variables for config)
 db = get_db_manager()
+
+# --- DB-persisted runtime config (editable from the website via /api/config) ---
+def _config_init():
+    """Create the app_config table and load persisted values into RUNTIME_CONFIG."""
+    try:
+        db.execute("""CREATE TABLE IF NOT EXISTS app_config (
+            key TEXT PRIMARY KEY, value TEXT,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
+        for r in (db.execute("SELECT key, value FROM app_config", fetch='all') or []):
+            RUNTIME_CONFIG[r['key']] = r['value']
+        print(f"app_config loaded: {RUNTIME_CONFIG}")
+    except Exception as e:
+        print(f"Warning: app_config init failed (using env defaults): {e}")
+
+def config_set_db(key, value):
+    """Persist a config key to the DB and update the in-memory RUNTIME_CONFIG."""
+    db.execute("""INSERT INTO app_config (key, value, updated_at)
+        VALUES (%s, %s, CURRENT_TIMESTAMP)
+        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value,
+        updated_at = CURRENT_TIMESTAMP""", (key, str(value)))
+    RUNTIME_CONFIG[key] = value
+
+_config_init()
 
 # Initialize backtest results store and register API routes
 backtest_results_store = None
@@ -128,11 +166,9 @@ def get_positions():
 
 @app.route('/api/order', methods=['POST'])
 def place_order():
-    """Place a buy or sell order"""
-    if not bot:
-        return jsonify({"error": "Bot not initialized"}), 503
-
-    data = request.json
+    """Place a buy or sell order. Routes to the DAS SIM backend when FALCON_EXECUTION=das,
+    otherwise to the in-memory paper bot. DAS orders are dry-run unless FALCON_DAS_LIVE=1."""
+    data = request.json or {}
     symbol = data.get('symbol', '').upper()
     side = data.get('side', '').lower()
     quantity = data.get('quantity', 0)
@@ -147,13 +183,151 @@ def place_order():
     if not isinstance(quantity, (int, float)) or quantity <= 0:
         return jsonify({"error": "Quantity must be a positive number"}), 400
 
-    # Place the order
-    result = bot.place_order(symbol, side, int(quantity), order_type, price)
+    # --- DAS SIM backend ---
+    if RUNTIME_CONFIG.get("execution_backend") == "das":
+        if not DAS_AVAILABLE:
+            return jsonify({"error": "DAS backend unavailable"}), 503
+        client = None
+        try:
+            client = DASExecutionClient(live=(os.getenv("FALCON_DAS_LIVE") == "1"))
+            client.connect()
+            ok, resp = client.login()
+            if not ok:
+                return jsonify({"error": "DAS login failed", "detail": resp[:200]}), 502
+            result = client.place_order(symbol, "B" if side == "buy" else "S",
+                                        int(quantity), price if order_type == "limit" else None)
+            result["backend"] = "das"
+            return jsonify(result), 200
+        except Exception as e:
+            return jsonify({"error": f"DAS order failed: {e}", "backend": "das"}), 500
+        finally:
+            if client:
+                client.close()
 
+    # --- paper bot backend ---
+    if not bot:
+        return jsonify({"error": "Bot not initialized"}), 503
+    result = bot.place_order(symbol, side, int(quantity), order_type, price)
+    result["backend"] = "paper"
     if result.get('status') == 'success':
         return jsonify(result), 200
-    else:
-        return jsonify(result), 400
+    return jsonify(result), 400
+
+
+@app.route('/api/das/health')
+def das_health():
+    """DAS SIM connection status (connect + login + BP/positions read; no orders)."""
+    if not DAS_AVAILABLE:
+        return jsonify({"connected": False, "error": "das_execution unavailable"}), 503
+    info = das_health_check()
+    info["execution_backend"] = RUNTIME_CONFIG.get("execution_backend")
+    return jsonify(info), (200 if info.get("connected") else 502)
+
+
+def _parse_das_buying_power(raw):
+    """Extract a float buying power from the raw `GET BP` response string.
+    DAS streams free-form text (e.g. "BP 50000.00" or "$BP ..."); grab the first
+    number that looks like a dollar amount."""
+    import re
+    if not raw:
+        return None
+    m = re.search(r"-?\d[\d,]*\.?\d*", raw.replace(",", ""))
+    if not m:
+        return None
+    try:
+        return float(m.group(0))
+    except ValueError:
+        return None
+
+
+def _parse_das_positions(raw):
+    """Parse `POSREFRESH` output into [{symbol, qty, avgPrice, side}].
+    Server response format (das-cmd-api): %POS symbol type qty avgcost initqty initprice realized.
+    `type` is position-STATE, not account (memory das-pos-type-not-account)."""
+    out = []
+    if not raw:
+        return out
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line.upper().startswith("%POS"):
+            continue
+        parts = line.split()
+        # %POS symbol type qty avgcost ...
+        if len(parts) < 5:
+            continue
+        try:
+            symbol = parts[1]
+            qty = float(parts[3])
+            avg_price = float(parts[4])
+        except (ValueError, IndexError):
+            continue
+        out.append({
+            "symbol": symbol,
+            "qty": qty,
+            "avgPrice": avg_price,
+            "side": "long" if qty >= 0 else "short",
+        })
+    return out
+
+
+@app.route('/api/das/account')
+def get_das_account():
+    """READ-ONLY DAS account/positions view (distinct from the paper-bot /api/account).
+    Connects to DAStrader, logs in, reads BP + positions via the existing read-only
+    methods (buying_power(), positions()) — never places or touches any order. The real
+    SIM/LIVE account id + numeric buying power + open positions, not the static paper value.
+    503 when DAS is unavailable; 502 on login failure."""
+    if not DAS_AVAILABLE:
+        return jsonify({"error": "das_execution unavailable"}), 503
+    client = None
+    try:
+        client = DASExecutionClient(live=(os.getenv("FALCON_DAS_LIVE") == "1"))
+        client.connect()
+        ok, resp = client.login()
+        if not ok:
+            return jsonify({"error": "DAS login failed", "detail": resp[:200]}), 502
+        bp_raw = client.buying_power()
+        pos_raw = client.positions()
+        return jsonify({
+            "account": client.account,
+            "buyingPower": _parse_das_buying_power(bp_raw),
+            "positions": _parse_das_positions(pos_raw),
+        }), 200
+    except Exception as e:
+        return jsonify({"error": f"DAS account read failed: {e}"}), 503
+    finally:
+        if client:
+            client.close()
+
+
+@app.route('/api/config', methods=['GET'])
+def get_config():
+    """Current runtime config (DB-persisted) + metadata for the website settings panel."""
+    return jsonify({
+        "execution_backend": RUNTIME_CONFIG.get("execution_backend", "paper"),
+        "das_available": DAS_AVAILABLE,
+        "das_account": os.getenv("DAS_ACCOUNT", ""),
+        "das_live_ceiling": os.getenv("FALCON_DAS_LIVE") == "1",
+        "options": {"execution_backend": ["paper", "das"]},
+    })
+
+
+@app.route('/api/config', methods=['POST'])
+def set_config():
+    """Persist config edits from the website to the DB (survives restarts)."""
+    data = request.json or {}
+    updated = {}
+    if "execution_backend" in data:
+        v = str(data["execution_backend"]).lower()
+        if v not in ("paper", "das"):
+            return jsonify({"error": "execution_backend must be 'paper' or 'das'"}), 400
+        if v == "das" and not DAS_AVAILABLE:
+            return jsonify({"error": "DAS backend unavailable on this host"}), 400
+        config_set_db("execution_backend", v)
+        updated["execution_backend"] = v
+    if not updated:
+        return jsonify({"error": "no recognized config keys"}), 400
+    return jsonify({"status": "success", "updated": updated, "config": RUNTIME_CONFIG}), 200
 
 @app.route('/api/trades')
 def get_trades():
@@ -386,14 +560,9 @@ def get_recommendations():
                     rec['_theme'] = profile.theme
                     all_recommendations.append(rec)
 
-        if not all_recommendations:
-            return jsonify({
-                "status": "no_data",
-                "message": "No screening results available yet",
-                "recommendations": []
-            })
-
-        # Deduplicate by ticker, keeping highest confidence
+        # Deduplicate by ticker, keeping highest confidence. (No early no_data
+        # return here: the intraday scanner below can still produce setups even
+        # when the swing screener has no rows — the status is decided after merge.)
         ticker_map = {}
         for rec in all_recommendations:
             ticker = rec.get('ticker', '')
@@ -403,7 +572,74 @@ def get_recommendations():
             if not existing or rec.get('confidence_score', 0) > existing.get('confidence_score', 0):
                 ticker_map[ticker] = rec
 
-        merged = sorted(ticker_map.values(), key=lambda x: x.get('confidence_score', 0), reverse=True)
+        # ---- INTRADAY SETUP SCANNER (falcon-trader #6) ----------------------
+        # Lazily merge real, ranked, structured day-trade setups computed from
+        # flat-file minute bars (FLAT FILES ONLY — never REST). In an image with
+        # boto3 this runs in-process; in the dashboard image (no boto3) the scan
+        # returns no in-process setups but the persisted "Intraday Scanner"
+        # profile rows are already picked up by the ProfileManager loop above.
+        # Either way we surface a data_recency label and never pass stale as live.
+        scan = {"session_date": None, "last_bar_ts": None,
+                "data_source": "flatfiles", "data_recency": None, "setups": []}
+        try:
+            from falcon_trader import intraday_scanner
+            scan = intraday_scanner.scan_intraday_setups()
+            for s in scan.get("setups", []):
+                s['_theme'] = 'intraday_setup'
+                s['_profile_source'] = 'intraday_scan'
+                t = s.get('ticker', '')
+                if not t:
+                    continue
+                existing = ticker_map.get(t)
+                if (not existing
+                        or s.get('edge_score', 0) > existing.get('edge_score', 0)
+                        or s.get('confidence_score', 0) > existing.get('confidence_score', 0)):
+                    ticker_map[t] = s
+        except Exception as scan_err:
+            # Never let the scanner break the existing endpoint.
+            print(f"Warning: intraday scan skipped: {scan_err}")
+
+        # If the in-process scan could not read flat files (boto3 absent in the
+        # dashboard image), recover the honest STALE recency / session metadata
+        # from any persisted intraday setup so staleness is still labeled, never
+        # silently dropped or mistaken for live.
+        # A data-bearing in-process scan carries one of the honest tier labels
+        # (#9 added DELAYED/DEGRADED above STALE). Any of these means the scan ran
+        # in-process and its recency must be passed through verbatim — no recovery,
+        # no re-labeling. Only when NONE is present (boto3 absent -> scan empty) do
+        # we recover the honest recency from a persisted setup.
+        _DATA_TIERS = ("STALE", "DELAYED", "DEGRADED", "LIVE")
+        in_process_ok = bool(scan.get("data_recency")) and any(
+            t in str(scan.get("data_recency")) for t in _DATA_TIERS
+        )
+        if not in_process_ok:
+            for rec in ticker_map.values():
+                rec_recency = str(rec.get('data_recency') or '')
+                if rec.get('_theme') == 'intraday_setup' and any(t in rec_recency for t in _DATA_TIERS):
+                    scan['data_recency'] = rec.get('data_recency')
+                    scan['session_date'] = rec.get('session_date')
+                    scan['last_bar_ts'] = scan.get('last_bar_ts') or rec.get('last_bar_ts')
+                    scan['data_source'] = rec.get('data_source') or scan.get('data_source')
+                    break
+
+        # Re-sort the merged set by the edge proxy first, confidence second.
+        merged = sorted(
+            ticker_map.values(),
+            key=lambda x: (x.get('edge_score', 0), x.get('confidence_score', 0)),
+            reverse=True,
+        )
+
+        # status='success' whenever the scan OR the screener produced anything.
+        if not merged and not scan.get("setups"):
+            return jsonify({
+                "status": "no_data",
+                "message": "No screening results available yet",
+                "recommendations": [],
+                "data_source": scan.get("data_source", "flatfiles"),
+                "session_date": scan.get("session_date"),
+                "last_bar_ts": scan.get("last_bar_ts"),
+                "data_recency": scan.get("data_recency"),
+            })
 
         return jsonify({
             "status": "success",
@@ -411,7 +647,12 @@ def get_recommendations():
             "screen_type": "multi-profile",
             "total_stocks_screened": total_stocks,
             "profiles_run": profiles_run,
-            "recommendations": merged
+            "recommendations": merged,
+            # Top-level recency/provenance (mandatory honest-staleness labeling).
+            "data_source": scan.get("data_source", "flatfiles"),
+            "session_date": scan.get("session_date"),
+            "last_bar_ts": scan.get("last_bar_ts"),
+            "data_recency": scan.get("data_recency"),
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -448,6 +689,63 @@ def get_recommendations_history():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/squawk')
+def get_squawk():
+    """Benzinga-style SQUAWK (falcon-trader #8) — a SHORT, ranked, de-duped,
+    reverse-chronological stream of REAL Polygon breaking headlines, gated to the
+    in-play / watchlist universe and high-impact catalyst types.
+
+    PRIVATE dashboard surface only — this endpoint NEVER writes to Slack / Notion
+    / any public channel. News is the ONE sanctioned Polygon REST use (publisher
+    publish-time, NOT the 15-min bars/quotes lag). Separate from
+    /api/recommendations — squawk headlines are never merged into the ranked
+    trade-setup contract. Degrades gracefully (last-good cache) on 429/error and
+    never raises a 500 that would break the page.
+    """
+    try:
+        from falcon_trader import squawk_feed
+        # Universe = FALCON_DASHBOARD_SYMBOLS unioned with the latest scan / merged
+        # rec tickers (shared context, no forked list); resolver falls back to the
+        # scanner's universe only when both are empty.
+        universe = squawk_feed.resolve_universe(
+            extra_tickers=squawk_feed._latest_scan_tickers())
+        result = squawk_feed.fetch_squawk(universe)
+
+        if not result.get("items"):
+            return jsonify({
+                "status": result.get("status", "no_data"),
+                "message": result.get("message", "No squawk headlines available."),
+                "items": [],
+                "universe": result.get("universe", universe),
+                "fetched_at": result.get("fetched_at"),
+                "data_recency": result.get(
+                    "data_recency", "LIVE (Polygon news, publisher-time)"),
+                "source": result.get("source", "polygon_news"),
+            })
+
+        return jsonify({
+            "status": result.get("status", "success"),
+            "items": result.get("items", []),
+            "count": result.get("count", len(result.get("items", []))),
+            "universe": result.get("universe", universe),
+            "fetched_at": result.get("fetched_at"),
+            "data_recency": result.get(
+                "data_recency", "LIVE (Polygon news, publisher-time)"),
+            "source": result.get("source", "polygon_news"),
+            "message": result.get("message"),
+        })
+    except Exception as e:
+        # NEVER 500 the dashboard — return an empty, clearly-labeled envelope.
+        print(f"Warning: squawk endpoint degraded: {e}")
+        return jsonify({
+            "status": "error",
+            "items": [],
+            "data_recency": "DEGRADED (squawk error)",
+            "source": "polygon_news",
+            "message": str(e),
+        })
+
+
 @app.route('/')
 def serve_index():
     """Serve the landing page"""
@@ -468,10 +766,18 @@ def serve_orchestrator():
     return send_file('www/orchestrator.html')
 
 
+@app.route('/strategies')
 @app.route('/strategies.html')
 def serve_strategies_page():
     """Serve the strategies list page"""
     return send_file('www/strategies.html')
+
+
+@app.route('/diagnostics')
+@app.route('/diagnostics.html')
+def serve_diagnostics():
+    """Serve the diagnostics / API console page (surfaces every endpoint — issue #4)"""
+    return send_file('www/diagnostics.html')
 
 
 @app.route('/strategy-view.html')
@@ -809,19 +1115,26 @@ def activate_youtube_strategy(youtube_strategy_id):
 def get_active_strategies():
     """List all active strategies with current performance"""
     try:
-        from strategy_analytics import StrategyAnalytics
+        try:
+            from falcon_trader.strategy_analytics import StrategyAnalytics
+            analytics = StrategyAnalytics(DB_PATH)
+            leaderboard = analytics.get_all_strategies_leaderboard()
+        except (ImportError, ConnectionError) as e:
+            return jsonify({"error": "analytics unavailable", "details": str(e)}), 503
 
-        analytics = StrategyAnalytics(DB_PATH)
-        leaderboard = analytics.get_all_strategies_leaderboard()
-
-        # Also get all strategies (not just those with performance data)
-        rows = db.execute('''
-            SELECT id, strategy_name, status, allocation_pct,
-                   performance_weight, created_at, activated_at
-            FROM active_strategies
-            WHERE status IN ('active', 'paused')
-            ORDER BY activated_at DESC
-        ''', fetch='all') or []
+        # Also get all strategies (not just those with performance data).
+        # The active_strategies table is created lazily on first activation; if
+        # it doesn't exist yet there simply are no active strategies.
+        try:
+            rows = db.execute('''
+                SELECT id, strategy_name, status, allocation_pct,
+                       performance_weight, created_at, activated_at
+                FROM active_strategies
+                WHERE status IN ('active', 'paused')
+                ORDER BY activated_at DESC
+            ''', fetch='all') or []
+        except Exception:
+            rows = []
 
         strategies = []
         for row in rows:
@@ -854,10 +1167,12 @@ def get_active_strategies():
 def get_strategy_performance(strategy_id):
     """Get detailed metrics for a strategy"""
     try:
-        from strategy_analytics import StrategyAnalytics
-
-        analytics = StrategyAnalytics(DB_PATH)
-        summary = analytics.get_strategy_summary(strategy_id)
+        try:
+            from falcon_trader.strategy_analytics import StrategyAnalytics
+            analytics = StrategyAnalytics(DB_PATH)
+            summary = analytics.get_strategy_summary(strategy_id)
+        except (ImportError, ConnectionError) as e:
+            return jsonify({"error": "analytics unavailable", "details": str(e)}), 503
 
         if not summary:
             return jsonify({"error": "Strategy not found"}), 404
@@ -953,10 +1268,12 @@ def get_strategy_signals(strategy_id):
 def get_strategy_leaderboard():
     """Rank strategies by win rate and ROI"""
     try:
-        from strategy_analytics import StrategyAnalytics
-
-        analytics = StrategyAnalytics(DB_PATH)
-        leaderboard = analytics.get_all_strategies_leaderboard()
+        try:
+            from falcon_trader.strategy_analytics import StrategyAnalytics
+            analytics = StrategyAnalytics(DB_PATH)
+            leaderboard = analytics.get_all_strategies_leaderboard()
+        except (ImportError, ConnectionError) as e:
+            return jsonify({"error": "analytics unavailable", "details": str(e)}), 503
 
         return jsonify({
             "status": "success",
@@ -1013,10 +1330,12 @@ def set_stop_loss():
 def get_aggregate_statistics():
     """Get aggregate statistics across all active strategies"""
     try:
-        from strategy_analytics import StrategyAnalytics
-
-        analytics = StrategyAnalytics(DB_PATH)
-        stats = analytics.get_aggregate_statistics()
+        try:
+            from falcon_trader.strategy_analytics import StrategyAnalytics
+            analytics = StrategyAnalytics(DB_PATH)
+            stats = analytics.get_aggregate_statistics()
+        except (ImportError, ConnectionError) as e:
+            return jsonify({"error": "analytics unavailable", "details": str(e)}), 503
 
         return jsonify({
             "status": "success",
