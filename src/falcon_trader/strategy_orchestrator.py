@@ -12,7 +12,7 @@ from datetime import datetime
 from paper_trading_bot import PaperTradingBot
 from strategy_executor import StrategyExecutor
 from strategy_optimizer import StrategyOptimizer
-from strategy_analytics import StrategyAnalytics
+from falcon_trader.strategy_analytics import StrategyAnalytics
 
 try:
     from dotenv import load_dotenv

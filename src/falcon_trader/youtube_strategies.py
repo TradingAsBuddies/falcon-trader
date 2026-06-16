@@ -204,9 +204,10 @@ Be concise and specific. Extract only factual information from the transcript.""
 
         try:
             response = self.client.messages.create(
-                model="claude-sonnet-4-5-20250929",
+                # Opus 4.8 = most capable + 1M context (ideal for long transcripts).
+                # temperature removed: sampling params 400 on Opus 4.8.
+                model="claude-opus-4-8",
                 max_tokens=4000,
-                temperature=0,
                 messages=[{
                     "role": "user",
                     "content": prompt
