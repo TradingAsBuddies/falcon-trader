@@ -8,9 +8,9 @@
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            background: linear-gradient(135deg, #1b1d1e 0%, #272822 100%);
             min-height: 100vh;
-            color: #e4e4e4;
+            color: #f8f8f2;
         }
         .container {
             max-width: 1200px;
@@ -20,15 +20,17 @@
         header {
             text-align: center;
             padding: 2rem 0;
-            border-bottom: 1px solid #333;
+            border-bottom: 1px solid #272822;
             margin-bottom: 2rem;
         }
         h1 {
             font-size: 2.5rem;
-            color: #00d4ff;
+            color: #f92672;
             margin-bottom: 0.5rem;
         }
-        .subtitle { color: #888; font-size: 1.1rem; }
+        .subtitle { color: #75715e; font-size: 1.1rem; }
+        .nav-links a { color: #66d9ef; text-decoration: none; margin-left: 1.25rem; font-size: 0.9rem; }
+        .nav-links a:hover { text-decoration: underline; }
         .grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
@@ -39,42 +41,42 @@
             background: rgba(255,255,255,0.05);
             border-radius: 12px;
             padding: 1.5rem;
-            border: 1px solid #333;
+            border: 1px solid #272822;
             transition: transform 0.2s, border-color 0.2s;
         }
         .card:hover {
             transform: translateY(-2px);
-            border-color: #00d4ff;
+            border-color: #a6e22e;
         }
         .card h3 {
-            color: #00d4ff;
+            color: #a6e22e;
             margin-bottom: 0.5rem;
             display: flex;
             align-items: center;
             gap: 0.5rem;
         }
-        .card p { color: #aaa; margin-bottom: 1rem; font-size: 0.9rem; }
+        .card p { color: #a59f85; margin-bottom: 1rem; font-size: 0.9rem; }
         .card a {
             display: inline-block;
             padding: 0.5rem 1rem;
-            background: #00d4ff;
-            color: #1a1a2e;
+            background: #a6e22e;
+            color: #1b1d1e;
             text-decoration: none;
             border-radius: 6px;
             font-weight: 600;
             font-size: 0.9rem;
         }
-        .card a:hover { background: #00b8e6; }
+        .card a:hover { background: #5a7a1e; }
 
         /* Recommendations Section */
         .recommendations {
             background: rgba(255,255,255,0.05);
             border-radius: 12px;
             padding: 1.5rem;
-            border: 1px solid #333;
+            border: 1px solid #272822;
         }
         .recommendations h2 {
-            color: #00d4ff;
+            color: #a6e22e;
             margin-bottom: 1rem;
             display: flex;
             align-items: center;
@@ -82,15 +84,15 @@
         }
         .refresh-btn {
             background: transparent;
-            border: 1px solid #00d4ff;
-            color: #00d4ff;
+            border: 1px solid #a6e22e;
+            color: #a6e22e;
             padding: 0.3rem 0.8rem;
             border-radius: 4px;
             cursor: pointer;
             font-size: 0.8rem;
         }
         .refresh-btn:hover { background: rgba(0,212,255,0.1); }
-        .timestamp { font-size: 0.8rem; color: #666; margin-bottom: 1rem; }
+        .timestamp { font-size: 0.8rem; color: #75715e; margin-bottom: 1rem; }
 
         table {
             width: 100%;
@@ -100,14 +102,14 @@
         th, td {
             padding: 0.75rem;
             text-align: left;
-            border-bottom: 1px solid #333;
+            border-bottom: 1px solid #272822;
         }
-        th { color: #00d4ff; font-weight: 600; font-size: 0.85rem; }
+        th { color: #a6e22e; font-weight: 600; font-size: 0.85rem; }
         td { font-size: 0.9rem; }
         .ticker { font-weight: bold; color: #fff; }
-        .high { color: #ff6b6b; }
-        .medium { color: #ffd93d; }
-        .low { color: #6bcb77; }
+        .high { color: #f92672; }
+        .medium { color: #e6db74; }
+        .low { color: #a6e22e; }
         .confidence {
             display: inline-block;
             padding: 0.2rem 0.5rem;
@@ -115,23 +117,23 @@
             font-size: 0.8rem;
             font-weight: bold;
         }
-        .conf-high { background: rgba(0,212,255,0.2); color: #00d4ff; }
-        .conf-med { background: rgba(255,217,61,0.2); color: #ffd93d; }
-        .conf-low { background: rgba(136,136,136,0.2); color: #888; }
+        .conf-high { background: rgba(0,212,255,0.2); color: #a6e22e; }
+        .conf-med { background: rgba(255,217,61,0.2); color: #e6db74; }
+        .conf-low { background: rgba(136,136,136,0.2); color: #75715e; }
 
         .no-data {
             text-align: center;
             padding: 2rem;
-            color: #666;
+            color: #75715e;
         }
-        .loading { color: #00d4ff; }
+        .loading { color: #a6e22e; }
 
         footer {
             text-align: center;
             padding: 2rem 0;
-            color: #666;
+            color: #75715e;
             font-size: 0.85rem;
-            border-top: 1px solid #333;
+            border-top: 1px solid #272822;
             margin-top: 2rem;
         }
     </style>
@@ -141,7 +143,17 @@
         <header>
             <h1>Falcon Trading Platform</h1>
             <p class="subtitle">AI-Powered Stock Screening & Paper Trading</p>
-        </header>
+        <nav class="nav-links">
+<a href="/">Home</a>
+<a href="/dashboard">Dashboard</a>
+<a href="/analytics">Analytics</a>
+<a href="/backtest-analytics">Backtests</a>
+<a href="/orchestrator">Orchestrator</a>
+<a href="/strategies">Strategies</a>
+<a href="/advisor">Advisor</a>
+<a href="/diagnostics">Diagnostics</a>
+</nav>
+</header>
 
         <div class="grid">
             <div class="card">
@@ -202,12 +214,62 @@
             </div>
         </div>
 
+        <div class="recommendations" id="squawk" style="margin-top:1.5rem;">
+            <h2>
+                📡 Squawk &mdash; Live Catalyst Headlines
+                <button class="refresh-btn" onclick="loadSquawk()">Refresh</button>
+            </h2>
+            <div class="timestamp" id="squawk-timestamp">Loading...</div>
+            <div id="squawk-content">
+                <div class="loading">Loading squawk...</div>
+            </div>
+        </div>
+
         <footer>
             Falcon Trading Platform | Powered by Claude AI
         </footer>
     </div>
 
     <script>
+        // Honest freshness badge (#9). Tiers, never upgraded:
+        //   DELAYED ~15m (Polygon REST) -> amber, shows (now_ET - last_bar_ts) age
+        //   DEGRADED (Polygon -> flat-file) -> amber
+        //   STALE / EOD / UNAVAILABLE -> grey-amber
+        //   LIVE (DAS) -> green (reserved; scanner never emits it)
+        function freshnessBadge(recency, lastBarTs, opts) {
+            opts = opts || {};
+            const rec = recency || '';
+            const isLive = /^LIVE/i.test(rec);
+            const isDelayed = /DELAYED/i.test(rec);
+            const isDegraded = /DEGRADED/i.test(rec);
+            const isStale = /STALE|EOD|UNAVAILABLE/i.test(rec);
+            let bg, border, icon, ageStr = '';
+            if (isLive) { bg = '#1f5a2f'; border = '#28a745'; icon = '🟢'; }
+            else if (isDelayed) {
+                bg = '#5a4a1f'; border = '#e0a800'; icon = '🟡';
+                if (lastBarTs) {
+                    const ageMin = Math.round((Date.now() - new Date(lastBarTs).getTime()) / 60000);
+                    if (isFinite(ageMin) && ageMin >= 0) ageStr = ` &middot; ${ageMin} min ago`;
+                }
+            }
+            else if (isDegraded) { bg = '#5a4a1f'; border = '#e0a800'; icon = '⚠️'; }
+            else { bg = '#3a3a3a'; border = '#e0a800'; icon = '⚠️'; }  // STALE / unknown
+
+            if (opts.block) {
+                return `<div style="background:${bg};border:1px solid ${border};`
+                     + `border-radius:6px;padding:8px 12px;margin-bottom:12px;`
+                     + `font-size:0.85rem;color:#f8f8f2;">`
+                     + `${icon} <strong>Data recency:</strong> ${escapeHtml(rec)}${ageStr}`
+                     + (opts.sessionDate ? ` &middot; session ${escapeHtml(opts.sessionDate)}` : '')
+                     + (opts.dataSource ? ` &middot; source: ${escapeHtml(opts.dataSource)}` : '')
+                     + ` &middot; PRIVATE</div>`;
+            }
+            return `<span style="background:${bg};border:1px solid ${border};`
+                 + `border-radius:4px;padding:1px 6px;font-size:0.72rem;color:#f8f8f2;`
+                 + `white-space:nowrap;" title="${escapeHtml(rec)}">`
+                 + `${icon} ${escapeHtml(rec.split(' (')[0])}${ageStr}</span>`;
+        }
+
         async function loadRecommendations() {
             const content = document.getElementById('recommendations-content');
             const timestamp = document.getElementById('timestamp');
@@ -220,7 +282,21 @@
                     const date = new Date(data.timestamp);
                     timestamp.textContent = `Last updated: ${date.toLocaleString()} | Screen type: ${data.screen_type} | Stocks analyzed: ${data.total_stocks_screened}`;
 
-                    let html = `<table>
+                    // Additive data-recency banner with honest freshness tiers (#9):
+                    //   DELAYED ~15m (Polygon REST) -> amber + age-in-minutes
+                    //   DEGRADED (Polygon error -> flat-file) -> amber
+                    //   STALE (EOD flat-file) -> grey/amber
+                    // 'LIVE (DAS)' green NEVER triggers for scanner rows — the scanner
+                    // never emits LIVE (DAS is deferred). Per-row recency rendered below.
+                    let html = '';
+                    if (data.data_recency) {
+                        html += freshnessBadge(data.data_recency, data.last_bar_ts, {
+                            sessionDate: data.session_date, dataSource: data.data_source,
+                            block: true,
+                        });
+                    }
+
+                    html += `<table>
                         <thead>
                             <tr>
                                 <th>Ticker</th>
@@ -229,6 +305,7 @@
                                 <th>Stop Loss</th>
                                 <th>Risk</th>
                                 <th>Confidence</th>
+                                <th>Recency</th>
                                 <th>Reasoning</th>
                             </tr>
                         </thead>
@@ -245,7 +322,8 @@
                             <td>$${rec.stop_loss}</td>
                             <td class="${riskClass}">${rec.risk_level}</td>
                             <td><span class="confidence ${confClass}">${rec.confidence_score}/10</span></td>
-                            <td style="max-width: 300px; font-size: 0.8rem; color: #888;">${rec.reasoning.substring(0, 100)}...</td>
+                            <td>${rec.data_recency ? freshnessBadge(rec.data_recency, rec.last_bar_ts, {}) : '&mdash;'}</td>
+                            <td style="max-width: 300px; font-size: 0.8rem; color: #75715e;">${rec.reasoning.substring(0, 100)}...</td>
                         </tr>`;
                     }
 
@@ -261,11 +339,112 @@
             }
         }
 
+        // ----- Squawk (falcon-trader #8): live catalyst headline stream -----
+        // PRIVATE dashboard surface. Reverse-chronological, ranked, de-duped,
+        // capped <=30. Reuses the data_recency banner pattern above.
+        const _seenSquawkIds = new Set();
+        let _squawkFirstLoad = true;
+
+        function squawkSentimentPill(sentiment) {
+            const s = (sentiment || '').toLowerCase();
+            let bg = 'rgba(136,136,136,0.2)', color = '#75715e', label = sentiment || 'no sentiment';
+            if (s === 'positive') { bg = 'rgba(0,212,255,0.2)'; color = '#a6e22e'; }
+            else if (s === 'negative') { bg = 'rgba(249,38,114,0.2)'; color = '#f92672'; }
+            else if (s === 'neutral') { bg = 'rgba(255,217,61,0.2)'; color = '#e6db74'; }
+            return `<span class="confidence" style="background:${bg};color:${color};">${label}</span>`;
+        }
+
+        function squawkTierColor(tier) {
+            if (tier === 'HIGH') return '#f92672';
+            if (tier === 'MED') return '#e6db74';
+            return '#a6e22e';
+        }
+
+        function escapeHtml(s) {
+            return (s || '').replace(/[&<>"']/g, c => ({
+                '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+            }[c]));
+        }
+
+        async function loadSquawk() {
+            const content = document.getElementById('squawk-content');
+            const timestamp = document.getElementById('squawk-timestamp');
+
+            try {
+                const response = await fetch('/api/squawk');
+                const data = await response.json();
+
+                // Data-recency banner (reuse the recs pattern). News is LIVE
+                // (publisher-time), not the 15-min bars/quotes lag.
+                let banner = '';
+                if (data.data_recency) {
+                    const degraded = /DEGRADED|UNAVAILABLE|error/i.test(data.data_recency);
+                    const bg = degraded ? '#5a4a1f' : '#1f5a2f';
+                    const border = degraded ? '#e0a800' : '#28a745';
+                    const icon = degraded ? '⚠️' : '🟢';
+                    banner = `<div style="background:${bg};border:1px solid ${border};`
+                          + `border-radius:6px;padding:8px 12px;margin-bottom:12px;`
+                          + `font-size:0.85rem;color:#f8f8f2;">`
+                          + `${icon} <strong>Data recency:</strong> ${escapeHtml(data.data_recency)}`
+                          + (data.source ? ` &middot; source: ${escapeHtml(data.source)}` : '')
+                          + ` &middot; PRIVATE</div>`;
+                }
+
+                const items = (data.items || []);
+                if ((data.status === 'success' || data.status === 'degraded') && items.length > 0) {
+                    timestamp.textContent = `Last updated: ${new Date(data.fetched_at).toLocaleString()} | `
+                        + `${items.length} headline(s) | universe: ${(data.universe || []).length} tickers`;
+
+                    let html = banner;
+                    for (const it of items) {
+                        const isNew = it.age === 'NEW' && !_squawkFirstLoad && !_seenSquawkIds.has(it.id);
+                        const newBadge = (it.age === 'NEW')
+                            ? `<span style="background:#f92672;color:#fff;border-radius:4px;padding:0 5px;font-size:0.7rem;font-weight:bold;margin-right:6px;">NEW</span>`
+                            : '';
+                        const tierColor = squawkTierColor(it.tier);
+                        const srcBadge = (it.source_count > 1)
+                            ? `<span style="color:#75715e;font-size:0.75rem;margin-left:6px;">×${it.source_count} sources</span>`
+                            : '';
+                        const tickerList = (it.tickers || [it.queried_ticker]).join(', ');
+                        html += `<div style="border-bottom:1px solid #272822;padding:0.7rem 0;">
+                            <div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:4px;">
+                                ${newBadge}
+                                <span class="ticker" style="color:#66d9ef;">${escapeHtml(tickerList)}</span>
+                                <span class="confidence" style="background:rgba(166,226,46,0.15);color:${tierColor};">
+                                    ${escapeHtml(it.catalyst_type)} · ${escapeHtml(it.tier)}</span>
+                                ${squawkSentimentPill(it.sentiment)}
+                                <span style="color:#75715e;font-size:0.75rem;margin-left:auto;">${escapeHtml(it.age)}</span>
+                            </div>
+                            <a href="${escapeHtml(it.article_url)}" target="_blank" rel="noopener noreferrer"
+                               style="color:#f8f8f2;text-decoration:none;font-size:0.95rem;line-height:1.35;">
+                               ${escapeHtml(it.title)}</a>
+                            <div style="color:#75715e;font-size:0.75rem;margin-top:3px;">
+                                ${escapeHtml(it.publisher)} · score ${it.squawk_score}${srcBadge}</div>
+                        </div>`;
+                        if (it.id) _seenSquawkIds.add(it.id);
+                    }
+                    content.innerHTML = html;
+                } else {
+                    content.innerHTML = banner + `<div class="no-data">`
+                        + (escapeHtml(data.message) || 'No squawk headlines in the session window.')
+                        + `</div>`;
+                    timestamp.textContent = data.fetched_at
+                        ? `Last checked: ${new Date(data.fetched_at).toLocaleString()}` : 'No data';
+                }
+                _squawkFirstLoad = false;
+            } catch (error) {
+                content.innerHTML = `<div class="no-data">Error loading squawk: ${escapeHtml(error.message)}</div>`;
+                timestamp.textContent = 'Error';
+            }
+        }
+
         // Load on page load
         loadRecommendations();
+        loadSquawk();
 
-        // Auto-refresh every 5 minutes
+        // Auto-refresh: recs every 5 min, squawk faster (60s) since it's breaking news.
         setInterval(loadRecommendations, 300000);
+        setInterval(loadSquawk, 60000);
     </script>
 </body>
 </html>

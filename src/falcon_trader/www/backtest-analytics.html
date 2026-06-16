@@ -10,9 +10,9 @@
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            background: linear-gradient(135deg, #1b1d1e 0%, #272822 100%);
             min-height: 100vh;
-            color: #e4e4e4;
+            color: #f8f8f2;
             padding: 1rem;
         }
         .container { max-width: 1600px; margin: 0 auto; }
@@ -22,12 +22,12 @@
             justify-content: space-between;
             align-items: center;
             padding: 1rem 0;
-            border-bottom: 1px solid #333;
+            border-bottom: 1px solid #272822;
             margin-bottom: 1.5rem;
         }
-        h1 { color: #00d4ff; font-size: 1.8rem; }
+        h1 { color: #f92672; font-size: 1.8rem; }
         .nav-links a {
-            color: #00d4ff;
+            color: #66d9ef;
             text-decoration: none;
             margin-left: 1.5rem;
             font-size: 0.9rem;
@@ -45,10 +45,10 @@
             background: rgba(255,255,255,0.05);
             border-radius: 8px;
             padding: 1rem;
-            border: 1px solid #333;
+            border: 1px solid #272822;
         }
         .stat-card h3 {
-            color: #888;
+            color: #75715e;
             font-size: 0.75rem;
             text-transform: uppercase;
             margin-bottom: 0.3rem;
@@ -58,8 +58,8 @@
             color: #fff;
             font-weight: 600;
         }
-        .positive { color: #6bcb77 !important; }
-        .negative { color: #ff6b6b !important; }
+        .positive { color: #a6e22e !important; }
+        .negative { color: #f92672 !important; }
 
         /* Chart Panels */
         .charts-row {
@@ -76,13 +76,13 @@
             background: rgba(255,255,255,0.05);
             border-radius: 8px;
             padding: 1.25rem;
-            border: 1px solid #333;
+            border: 1px solid #272822;
         }
         .panel.full-width {
             grid-column: 1 / -1;
         }
         .panel h2 {
-            color: #00d4ff;
+            color: #a6e22e;
             font-size: 1rem;
             margin-bottom: 1rem;
             display: flex;
@@ -95,21 +95,21 @@
         }
         .panel-controls button, .panel-controls select {
             background: transparent;
-            border: 1px solid #444;
-            color: #888;
+            border: 1px solid #3e3d32;
+            color: #75715e;
             padding: 0.25rem 0.75rem;
             border-radius: 4px;
             font-size: 0.75rem;
             cursor: pointer;
         }
         .panel-controls button:hover, .panel-controls select:hover {
-            border-color: #00d4ff;
-            color: #00d4ff;
+            border-color: #a6e22e;
+            color: #a6e22e;
         }
         .panel-controls button.active {
-            background: #00d4ff;
-            color: #1a1a2e;
-            border-color: #00d4ff;
+            background: #a6e22e;
+            color: #1b1d1e;
+            border-color: #a6e22e;
         }
 
         .chart-container {
@@ -126,10 +126,10 @@
         th, td {
             padding: 0.75rem;
             text-align: left;
-            border-bottom: 1px solid #333;
+            border-bottom: 1px solid #272822;
         }
         th {
-            color: #888;
+            color: #75715e;
             font-weight: 500;
             text-transform: uppercase;
             font-size: 0.7rem;
@@ -144,9 +144,9 @@
             font-size: 0.7rem;
             font-weight: 600;
         }
-        .badge.success { background: rgba(107, 203, 119, 0.2); color: #6bcb77; }
-        .badge.warning { background: rgba(255, 193, 7, 0.2); color: #ffc107; }
-        .badge.danger { background: rgba(255, 107, 107, 0.2); color: #ff6b6b; }
+        .badge.success { background: rgba(107, 203, 119, 0.2); color: #a6e22e; }
+        .badge.warning { background: rgba(255, 193, 7, 0.2); color: #e6db74; }
+        .badge.danger { background: rgba(255, 107, 107, 0.2); color: #f92672; }
 
         /* Responsive */
         @media (max-width: 1200px) {
@@ -160,14 +160,14 @@
         .loading {
             text-align: center;
             padding: 2rem;
-            color: #888;
+            color: #75715e;
         }
         .error {
             background: rgba(255, 107, 107, 0.1);
-            border: 1px solid #ff6b6b;
+            border: 1px solid #f92672;
             padding: 1rem;
             border-radius: 8px;
-            color: #ff6b6b;
+            color: #f92672;
             margin-bottom: 1rem;
         }
     </style>
@@ -177,11 +177,15 @@
         <header>
             <h1>Backtest Analytics</h1>
             <nav class="nav-links">
-                <a href="/">Dashboard</a>
-                <a href="/analytics.html">Live Analytics</a>
-                <a href="/strategies.html">Strategies</a>
-                <a href="/orchestrator.html">Orchestrator</a>
-            </nav>
+<a href="/">Home</a>
+<a href="/dashboard">Dashboard</a>
+<a href="/analytics">Analytics</a>
+<a href="/backtest-analytics">Backtests</a>
+<a href="/orchestrator">Orchestrator</a>
+<a href="/strategies">Strategies</a>
+<a href="/advisor">Advisor</a>
+<a href="/diagnostics">Diagnostics</a>
+</nav>
         </header>
 
         <div id="error-container"></div>
@@ -546,7 +550,7 @@
 
             if (returnChart) returnChart.destroy();
 
-            const colors = data.map(s => (s.avg_return || 0) >= 0 ? '#6bcb77' : '#ff6b6b');
+            const colors = data.map(s => (s.avg_return || 0) >= 0 ? '#a6e22e' : '#f92672');
 
             returnChart = new Chart(ctx, {
                 type: 'bar',
@@ -567,12 +571,12 @@
                     },
                     scales: {
                         y: {
-                            grid: { color: '#333' },
-                            ticks: { color: '#888', callback: v => v + '%' }
+                            grid: { color: '#272822' },
+                            ticks: { color: '#75715e', callback: v => v + '%' }
                         },
                         x: {
                             grid: { display: false },
-                            ticks: { color: '#888' }
+                            ticks: { color: '#75715e' }
                         }
                     }
                 }
@@ -591,7 +595,7 @@
                     datasets: [{
                         label: 'Avg Daily Return',
                         data: returns.map(r => (r * 100).toFixed(2)),
-                        borderColor: '#00d4ff',
+                        borderColor: '#a6e22e',
                         backgroundColor: 'rgba(0, 212, 255, 0.1)',
                         fill: true,
                         tension: 0.3
@@ -605,12 +609,12 @@
                     },
                     scales: {
                         y: {
-                            grid: { color: '#333' },
-                            ticks: { color: '#888', callback: v => v + '%' }
+                            grid: { color: '#272822' },
+                            ticks: { color: '#75715e', callback: v => v + '%' }
                         },
                         x: {
                             grid: { display: false },
-                            ticks: { color: '#888', maxRotation: 45 }
+                            ticks: { color: '#75715e', maxRotation: 45 }
                         }
                     }
                 }
