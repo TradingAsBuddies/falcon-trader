@@ -19,6 +19,13 @@ RUN pip install --no-cache-dir --timeout 120 \
 COPY . .
 RUN pip install --no-cache-dir ".[youtube]"
 
+# Signal/Risk tab (sangre-signal) reads AI keys at runtime, not baked here:
+#   ANTHROPIC_API_KEY  (preferred) -> Claude narrative
+#   PERPLEXITY_API_KEY (fallback)  -> Perplexity narrative
+# Provide via runtime env (-e / compose env). If both are absent, the
+# /api/risk-analysis structured flags still render; only the narrative
+# degrades to the sangre-signal library text fallback.
+
 # Dashboard runs on port 5000
 ENV FLASK_HOST=0.0.0.0
 EXPOSE 5000

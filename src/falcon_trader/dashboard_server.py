@@ -1560,6 +1560,110 @@ def serve_backtest_analytics():
     return send_file('www/backtest-analytics.html')
 
 
+@app.route('/signals-risk')
+@app.route('/signals-risk.html')
+def serve_signals_risk():
+    """Serve the Signal/Risk analyzer page (sangre-signal integration)"""
+    return send_file('www/signals-risk.html')
+
+
+# Spanish translations for sangre-signal risk-flag messages, keyed on the exact
+# English emission from sangre_signal/analyzers/risk_analyzer.py. The float message
+# interpolates a number, so it is matched by prefix and re-interpolated below.
+RISK_FLAG_ES = {
+    "Country of origin is in red-flag list": "País de origen en lista de alto riesgo",
+    "Country of origin is non-US": "País de origen no estadounidense",
+    "Headquarters location includes red-flag keywords": "La sede incluye ubicaciones de alto riesgo",
+    "ADR/listed foreign issuer": "ADR/emisor extranjero cotizado",
+}
+
+
+def _localize_flag_message_es(message_en):
+    """Return the Spanish flag message for an English emission, or None if unmapped.
+    Handles the templated 'Float below {N}M shares' message by re-interpolating N."""
+    if message_en in RISK_FLAG_ES:
+        return RISK_FLAG_ES[message_en]
+    if message_en.startswith("Float below ") and message_en.endswith(" shares"):
+        amount = message_en[len("Float below "):-len(" shares")]
+        return f"Flotante inferior a {amount} acciones"
+    return None
+
+
+@app.route('/api/risk-analysis', methods=['GET'])
+def get_risk_analysis():
+    """Stock risk analysis via sangre-signal.
+    Query: tickers (required, comma-sep), lang ('en'|'es', narrative only).
+    Returns: {lang, ai_enabled, results:[{ticker, ok, has_risks, flags:[{flag_type,message,severity}], narrative} | {ticker, ok:false, error}]}
+    """
+    try:
+        import os
+        from sangre_signal.fetchers import fetch_stock_info, fetch_vix
+        from sangre_signal.analyzers import analyze_stock_risks
+        from sangre_signal.formatters import get_formatter
+        from sangre_signal.config import RED_FLAGS
+
+        raw = (request.args.get('tickers') or '').strip()
+        if not raw:
+            return jsonify({"error": "Missing 'tickers' query parameter"}), 400
+        lang = (request.args.get('lang') or 'en').lower()
+        if lang not in ('en', 'es'):
+            lang = 'en'
+
+        tickers = []
+        for t in raw.split(','):
+            t = t.strip().upper()
+            if t and t not in tickers:
+                tickers.append(t)
+        tickers = tickers[:10]
+        if not tickers:
+            return jsonify({"error": "No valid tickers provided"}), 400
+
+        ai_enabled = bool(os.getenv('ANTHROPIC_API_KEY') or os.getenv('PERPLEXITY_API_KEY'))
+        if os.getenv('ANTHROPIC_API_KEY'):
+            fmt_name = 'claude'
+        elif os.getenv('PERPLEXITY_API_KEY'):
+            fmt_name = 'perplexity'
+        else:
+            fmt_name = 'claude'
+        formatter = get_formatter(fmt_name, language=lang)
+
+        try:
+            vix_value = fetch_vix()
+        except Exception:
+            vix_value = None
+
+        results = []
+        for ticker in tickers:
+            try:
+                stock_info = fetch_stock_info(ticker)
+                if stock_info is None:
+                    results.append({"ticker": ticker, "ok": False, "error": f"Could not fetch data for ticker '{ticker}'"})
+                    continue
+                # yfinance soft-fails to a populated "Unknown" shell rather than empty info.
+                # No name AND no price => treat as not-found; never render a false-safe "no risks" card.
+                if not (stock_info.long_name or stock_info.short_name) and stock_info.regular_market_price is None:
+                    msg = ("Símbolo no encontrado" if lang == "es" else "Ticker not found")
+                    results.append({"ticker": ticker, "ok": False, "error": msg})
+                    continue
+                risk = analyze_stock_risks(stock_info)
+                flags = []
+                for f in risk.flags:
+                    message_en = f.message
+                    if lang == 'es':
+                        message = _localize_flag_message_es(message_en) or message_en
+                    else:
+                        message = message_en
+                    flags.append({"flag_type": f.flag_type, "message": message, "message_en": message_en, "severity": f.severity.value.upper()})
+                narrative = formatter.format(stock_info, risk, RED_FLAGS.min_free_float, vix_value)
+                results.append({"ticker": ticker, "ok": True, "has_risks": risk.has_risks, "flags": flags, "narrative": narrative})
+            except Exception as e:
+                results.append({"ticker": ticker, "ok": False, "error": str(e)})
+
+        return jsonify({"lang": lang, "ai_enabled": ai_enabled, "results": results})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 # ============================================
 # SCREENER PROFILE ENDPOINTS
 # ============================================
@@ -2128,6 +2232,9 @@ def main():
     """CLI entry point for falcon-dashboard"""
     import sys
 
+    # Signal/Risk tab: ANTHROPIC_API_KEY (preferred) / PERPLEXITY_API_KEY (fallback)
+    # are read at request time in /api/risk-analysis; if both are absent the
+    # structured flags still render and the narrative uses the library fallback.
     # Get API keys from environment variables (preferred) or command line
     MASSIVE_API_KEY = os.getenv('MASSIVE_API_KEY', '')
     CLAUDE_API_KEY = os.getenv('CLAUDE_API_KEY', '')
