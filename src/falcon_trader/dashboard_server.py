@@ -1618,8 +1618,10 @@ def get_risk_analysis():
         if not tickers:
             return jsonify({"error": "No valid tickers provided"}), 400
 
-        ai_enabled = bool(os.getenv('ANTHROPIC_API_KEY') or os.getenv('PERPLEXITY_API_KEY'))
-        if os.getenv('ANTHROPIC_API_KEY'):
+        # The Falcon stack provisions the Anthropic key as CLAUDE_API_KEY; accept either name.
+        anthropic_key = os.getenv('ANTHROPIC_API_KEY') or os.getenv('CLAUDE_API_KEY')
+        ai_enabled = bool(anthropic_key or os.getenv('PERPLEXITY_API_KEY'))
+        if anthropic_key:
             fmt_name = 'claude'
         elif os.getenv('PERPLEXITY_API_KEY'):
             fmt_name = 'perplexity'
