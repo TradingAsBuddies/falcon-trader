@@ -10,9 +10,9 @@
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            background: linear-gradient(135deg, #1b1d1e 0%, #272822 100%);
             min-height: 100vh;
-            color: #e4e4e4;
+            color: #f8f8f2;
             padding: 1rem;
         }
         .container { max-width: 1600px; margin: 0 auto; }
@@ -22,12 +22,12 @@
             justify-content: space-between;
             align-items: center;
             padding: 1rem 0;
-            border-bottom: 1px solid #333;
+            border-bottom: 1px solid #272822;
             margin-bottom: 1.5rem;
         }
-        h1 { color: #00d4ff; font-size: 1.8rem; }
+        h1 { color: #f92672; font-size: 1.8rem; }
         .nav-links a {
-            color: #00d4ff;
+            color: #66d9ef;
             text-decoration: none;
             margin-left: 1.5rem;
             font-size: 0.9rem;
@@ -45,10 +45,10 @@
             background: rgba(255,255,255,0.05);
             border-radius: 8px;
             padding: 1rem;
-            border: 1px solid #333;
+            border: 1px solid #272822;
         }
         .stat-card h3 {
-            color: #888;
+            color: #75715e;
             font-size: 0.75rem;
             text-transform: uppercase;
             margin-bottom: 0.3rem;
@@ -58,8 +58,8 @@
             color: #fff;
             font-weight: 600;
         }
-        .positive { color: #6bcb77 !important; }
-        .negative { color: #ff6b6b !important; }
+        .positive { color: #a6e22e !important; }
+        .negative { color: #f92672 !important; }
 
         /* Chart Panels */
         .charts-row {
@@ -76,10 +76,10 @@
             background: rgba(255,255,255,0.05);
             border-radius: 8px;
             padding: 1.25rem;
-            border: 1px solid #333;
+            border: 1px solid #272822;
         }
         .panel h2 {
-            color: #00d4ff;
+            color: #a6e22e;
             font-size: 1rem;
             margin-bottom: 1rem;
             display: flex;
@@ -92,21 +92,21 @@
         }
         .panel-controls button {
             background: transparent;
-            border: 1px solid #444;
-            color: #888;
+            border: 1px solid #3e3d32;
+            color: #75715e;
             padding: 0.25rem 0.75rem;
             border-radius: 4px;
             font-size: 0.75rem;
             cursor: pointer;
         }
         .panel-controls button.active {
-            background: #00d4ff;
-            color: #1a1a2e;
-            border-color: #00d4ff;
+            background: #a6e22e;
+            color: #1b1d1e;
+            border-color: #a6e22e;
         }
         .panel-controls button:hover:not(.active) {
-            border-color: #00d4ff;
-            color: #00d4ff;
+            border-color: #a6e22e;
+            color: #a6e22e;
         }
 
         .chart-container {
@@ -125,23 +125,23 @@
         th, td {
             padding: 0.6rem;
             text-align: left;
-            border-bottom: 1px solid #333;
+            border-bottom: 1px solid #272822;
             font-size: 0.85rem;
         }
         th {
-            color: #888;
+            color: #75715e;
             font-weight: 600;
         }
-        td { color: #e4e4e4; }
-        .strategy-name { font-weight: 600; color: #00d4ff; }
+        td { color: #f8f8f2; }
+        .strategy-name { font-weight: 600; color: #a6e22e; }
 
         /* Loading & Error */
         .loading {
             text-align: center;
             padding: 3rem;
-            color: #888;
+            color: #75715e;
         }
-        .error { color: #ff6b6b; }
+        .error { color: #f92672; }
 
         /* Responsive */
         @media (max-width: 1200px) {
@@ -265,8 +265,8 @@
 
     <script>
         // Chart.js defaults
-        Chart.defaults.color = '#888';
-        Chart.defaults.borderColor = '#333';
+        Chart.defaults.color = '#75715e';
+        Chart.defaults.borderColor = '#272822';
 
         let performanceChart, cumulativeChart, strategyChart, winLossChart, histogramChart;
         let currentDays = 30;
@@ -406,7 +406,7 @@
                         label: 'Backtests Run',
                         data: counts,
                         type: 'line',
-                        borderColor: '#00d4ff',
+                        borderColor: '#a6e22e',
                         backgroundColor: 'transparent',
                         tension: 0.3,
                         pointRadius: 3,
@@ -454,7 +454,7 @@
                     datasets: [{
                         label: 'Cumulative Return %',
                         data: cumulativeReturns,
-                        borderColor: '#00d4ff',
+                        borderColor: '#a6e22e',
                         backgroundColor: 'rgba(0, 212, 255, 0.1)',
                         fill: true,
                         tension: 0.3,
@@ -519,7 +519,7 @@
             // Update table
             const tbody = document.querySelector('#strategyTable tbody');
             if (strategies.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#888;">No strategy data yet</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#75715e;">No strategy data yet</td></tr>';
             } else {
                 tbody.innerHTML = strategies.map(s => `
                     <tr>
@@ -549,7 +549,7 @@
                                 Math.min(s.totalTrades / 10, 100),
                                 s.winRate * 50 + Math.min(s.backtests, 50)
                             ],
-                            borderColor: ['#00d4ff', '#6bcb77', '#ffd93d', '#ff6b6b', '#9b59b6'][i],
+                            borderColor: ['#a6e22e', '#a6e22e', '#e6db74', '#f92672', '#ae81ff'][i],
                             backgroundColor: ['rgba(0,212,255,0.1)', 'rgba(107,203,119,0.1)', 'rgba(255,217,61,0.1)', 'rgba(255,107,107,0.1)', 'rgba(155,89,182,0.1)'][i]
                         }))
                     },
@@ -560,8 +560,8 @@
                         scales: {
                             r: {
                                 beginAtZero: true,
-                                grid: { color: '#333' },
-                                angleLines: { color: '#333' }
+                                grid: { color: '#272822' },
+                                angleLines: { color: '#272822' }
                             }
                         }
                     }
@@ -584,7 +584,7 @@
                     labels: ['Profitable', 'Losing'],
                     datasets: [{
                         data: [profitable, losing],
-                        backgroundColor: ['#6bcb77', '#ff6b6b'],
+                        backgroundColor: ['#a6e22e', '#f92672'],
                         borderWidth: 0
                     }]
                 },

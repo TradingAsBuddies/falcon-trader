@@ -8,9 +8,9 @@
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            background: linear-gradient(135deg, #1b1d1e 0%, #272822 100%);
             min-height: 100vh;
-            color: #e4e4e4;
+            color: #f8f8f2;
         }
         .container {
             max-width: 1200px;
@@ -22,16 +22,16 @@
             justify-content: space-between;
             align-items: center;
             padding: 1.5rem 0;
-            border-bottom: 1px solid #333;
+            border-bottom: 1px solid #272822;
             margin-bottom: 2rem;
         }
         h1 {
             font-size: 2rem;
-            color: #00d4ff;
+            color: #f92672;
         }
         nav a {
             margin-left: 1.5rem;
-            color: #00d4ff;
+            color: #a6e22e;
             text-decoration: none;
             font-size: 0.9rem;
         }
@@ -41,11 +41,11 @@
             background: rgba(255,255,255,0.05);
             border-radius: 12px;
             padding: 1.5rem;
-            border: 1px solid #333;
+            border: 1px solid #272822;
             margin-bottom: 2rem;
         }
         .submit-section h2 {
-            color: #00d4ff;
+            color: #a6e22e;
             margin-bottom: 1rem;
             font-size: 1.3rem;
         }
@@ -59,24 +59,24 @@
             min-width: 300px;
             padding: 0.75rem;
             background: rgba(255,255,255,0.1);
-            border: 1px solid #444;
+            border: 1px solid #3e3d32;
             border-radius: 6px;
             color: #fff;
             font-size: 0.9rem;
         }
         .submit-form button {
             padding: 0.75rem 1.5rem;
-            background: #00d4ff;
-            color: #1a1a2e;
+            background: #a6e22e;
+            color: #1b1d1e;
             border: none;
             border-radius: 6px;
             font-weight: 600;
             cursor: pointer;
             transition: background 0.2s;
         }
-        .submit-form button:hover { background: #00b8e6; }
+        .submit-form button:hover { background: #5a7a1e; }
         .submit-form button:disabled {
-            background: #555;
+            background: #49483e;
             cursor: not-allowed;
         }
         .status-message {
@@ -87,13 +87,13 @@
         }
         .status-message.success {
             background: rgba(107, 203, 119, 0.2);
-            border: 1px solid #6bcb77;
-            color: #6bcb77;
+            border: 1px solid #a6e22e;
+            color: #a6e22e;
         }
         .status-message.error {
             background: rgba(255, 107, 107, 0.2);
-            border: 1px solid #ff6b6b;
-            color: #ff6b6b;
+            border: 1px solid #f92672;
+            color: #f92672;
         }
 
         .strategies-grid {
@@ -105,16 +105,16 @@
             background: rgba(255,255,255,0.05);
             border-radius: 12px;
             padding: 1.5rem;
-            border: 1px solid #333;
+            border: 1px solid #272822;
             transition: transform 0.2s, border-color 0.2s;
             cursor: pointer;
         }
         .strategy-card:hover {
             transform: translateY(-2px);
-            border-color: #00d4ff;
+            border-color: #a6e22e;
         }
         .strategy-card h3 {
-            color: #00d4ff;
+            color: #a6e22e;
             margin-bottom: 0.5rem;
             font-size: 1.1rem;
         }
@@ -127,32 +127,32 @@
         .tag {
             padding: 0.2rem 0.6rem;
             background: rgba(0,212,255,0.2);
-            color: #00d4ff;
+            color: #a6e22e;
             border-radius: 4px;
             font-size: 0.75rem;
             font-weight: 500;
         }
         .strategy-card p {
-            color: #aaa;
+            color: #a59f85;
             font-size: 0.85rem;
             line-height: 1.4;
             margin-bottom: 0.75rem;
         }
         .strategy-card .creator {
-            color: #888;
+            color: #75715e;
             font-size: 0.8rem;
             margin-bottom: 0.5rem;
         }
         .loading {
             text-align: center;
             padding: 3rem;
-            color: #00d4ff;
+            color: #a6e22e;
             font-size: 1.1rem;
         }
         .no-data {
             text-align: center;
             padding: 3rem;
-            color: #666;
+            color: #75715e;
         }
     </style>
 </head>
@@ -160,17 +160,22 @@
     <div class="container">
         <header>
             <h1>Trading Strategies</h1>
-            <nav>
-                <a href="/">Home</a>
-                <a href="/dashboard">Dashboard</a>
-                <a href="/advisor">AI Advisor</a>
-                <a href="/signals-risk">Signal/Risk</a>
-            </nav>
+            <nav class="nav-links">
+<a href="/">Home</a>
+<a href="/dashboard">Dashboard</a>
+<a href="/analytics">Analytics</a>
+<a href="/backtest-analytics">Backtests</a>
+<a href="/orchestrator">Orchestrator</a>
+<a href="/strategies">Strategies</a>
+<a href="/advisor">Advisor</a>
+<a href="/signals-risk">Signal/Risk</a>
+<a href="/diagnostics">Diagnostics</a>
+</nav>
         </header>
 
         <div class="submit-section">
             <h2>Submit YouTube Strategy</h2>
-            <p style="color: #888; font-size: 0.85rem; margin-bottom: 1rem;">
+            <p style="color: #75715e; font-size: 0.85rem; margin-bottom: 1rem;">
                 Paste a YouTube URL to automatically extract trading strategies using AI
             </p>
             <form class="submit-form" id="submitForm">
@@ -216,7 +221,7 @@
                                     ${tagHtml}
                                 </div>
                                 <p>${(strategy.strategy_overview || 'No description available').substring(0, 150)}...</p>
-                                <div style="color: #666; font-size: 0.75rem;">
+                                <div style="color: #75715e; font-size: 0.75rem;">
                                     ${strategy.trading_style || 'No style specified'}
                                 </div>
                             </div>

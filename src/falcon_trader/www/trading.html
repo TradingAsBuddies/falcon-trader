@@ -8,9 +8,9 @@
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            background: linear-gradient(135deg, #1b1d1e 0%, #272822 100%);
             min-height: 100vh;
-            color: #e4e4e4;
+            color: #f8f8f2;
             padding: 1rem;
         }
         .container { max-width: 1400px; margin: 0 auto; }
@@ -19,12 +19,12 @@
             justify-content: space-between;
             align-items: center;
             padding: 1rem 0;
-            border-bottom: 1px solid #333;
+            border-bottom: 1px solid #272822;
             margin-bottom: 1.5rem;
         }
-        h1 { color: #00d4ff; font-size: 1.8rem; }
+        h1 { color: #f92672; font-size: 1.8rem; }
         .nav-links a {
-            color: #00d4ff;
+            color: #66d9ef;
             text-decoration: none;
             margin-left: 1.5rem;
             font-size: 0.9rem;
@@ -42,10 +42,10 @@
             background: rgba(255,255,255,0.05);
             border-radius: 8px;
             padding: 1rem;
-            border: 1px solid #333;
+            border: 1px solid #272822;
         }
         .stat-card h3 {
-            color: #888;
+            color: #75715e;
             font-size: 0.75rem;
             text-transform: uppercase;
             margin-bottom: 0.3rem;
@@ -55,8 +55,8 @@
             color: #fff;
             font-weight: 600;
         }
-        .positive { color: #6bcb77 !important; }
-        .negative { color: #ff6b6b !important; }
+        .positive { color: #a6e22e !important; }
+        .negative { color: #f92672 !important; }
 
         /* Panels */
         .panels {
@@ -69,11 +69,11 @@
             background: rgba(255,255,255,0.05);
             border-radius: 8px;
             padding: 1.25rem;
-            border: 1px solid #333;
+            border: 1px solid #272822;
         }
         .panel.full { grid-column: 1 / -1; }
         .panel h2 {
-            color: #00d4ff;
+            color: #a6e22e;
             font-size: 1rem;
             margin-bottom: 1rem;
         }
@@ -86,16 +86,16 @@
         th, td {
             padding: 0.6rem;
             text-align: left;
-            border-bottom: 1px solid #333;
+            border-bottom: 1px solid #272822;
             font-size: 0.85rem;
         }
-        th { color: #888; font-weight: 600; }
-        td { color: #e4e4e4; }
-        .ticker { font-weight: 600; color: #00d4ff; }
+        th { color: #75715e; font-weight: 600; }
+        td { color: #f8f8f2; }
+        .ticker { font-weight: 600; color: #a6e22e; }
 
-        .loading { text-align: center; padding: 2rem; color: #888; }
-        .buy { color: #6bcb77; }
-        .sell { color: #ff6b6b; }
+        .loading { text-align: center; padding: 2rem; color: #75715e; }
+        .buy { color: #a6e22e; }
+        .sell { color: #f92672; }
 
         @media (max-width: 900px) {
             .stats-grid { grid-template-columns: repeat(2, 1fr); }
@@ -108,13 +108,51 @@
         <header>
             <h1>Trading Dashboard</h1>
             <nav class="nav-links">
-                <a href="/">Home</a>
-                <a href="/analytics">Analytics</a>
-                <a href="/strategies.html">Strategies</a>
-                <a href="/orchestrator.html">Orchestrator</a>
-                <a href="/signals-risk">Signal/Risk</a>
-            </nav>
+<a href="/">Home</a>
+<a href="/dashboard">Dashboard</a>
+<a href="/analytics">Analytics</a>
+<a href="/backtest-analytics">Backtests</a>
+<a href="/orchestrator">Orchestrator</a>
+<a href="/strategies">Strategies</a>
+<a href="/advisor">Advisor</a>
+<a href="/signals-risk">Signal/Risk</a>
+<a href="/diagnostics">Diagnostics</a>
+</nav>
         </header>
+
+        <!-- Execution Control Panel (DAS SIM + bot + manual order) -->
+        <div class="panel full" style="margin-bottom:16px;">
+            <h2>Execution Control
+                <span id="dasStatus" style="float:right;font-size:13px;padding:3px 10px;border-radius:12px;background:#3e3d32;color:#75715e;">DAS: …</span>
+            </h2>
+            <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:8px;">
+                <button onclick="botControl('start')" style="background:#a6e22e;color:#1b1d1e;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;font-weight:600;">▶ Start Bot</button>
+                <button onclick="botControl('stop')" style="background:#f92672;color:#f8f8f2;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;font-weight:600;">■ Stop Bot</button>
+                <span id="botStatus" style="color:#75715e;">bot: …</span>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px;">
+                <label style="color:#75715e;">Execution backend:</label>
+                <select id="cfgBackend" style="background:#1b1d1e;color:#f8f8f2;border:1px solid #3e3d32;border-radius:6px;padding:7px;">
+                    <option value="paper">paper (in-memory sim)</option>
+                    <option value="das">das (DAStrader SIM)</option>
+                </select>
+                <button onclick="saveConfig()" style="background:#ae81ff;color:#1b1d1e;border:none;padding:7px 14px;border-radius:6px;cursor:pointer;font-weight:600;">Save Config</button>
+                <span id="cfgResult" style="color:#75715e;font-size:13px;"></span>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:12px;border-top:1px solid #3e3d32;padding-top:12px;">
+                <input id="ordSym" placeholder="SYMBOL" style="width:90px;text-transform:uppercase;background:#1b1d1e;color:#f8f8f2;border:1px solid #3e3d32;border-radius:6px;padding:7px;">
+                <select id="ordSide" style="background:#1b1d1e;color:#f8f8f2;border:1px solid #3e3d32;border-radius:6px;padding:7px;">
+                    <option value="buy">BUY</option><option value="sell">SELL</option>
+                </select>
+                <input id="ordQty" type="number" value="1" min="1" style="width:80px;background:#1b1d1e;color:#f8f8f2;border:1px solid #3e3d32;border-radius:6px;padding:7px;">
+                <select id="ordType" onchange="document.getElementById('ordPx').style.display=this.value==='limit'?'inline':'none'" style="background:#1b1d1e;color:#f8f8f2;border:1px solid #3e3d32;border-radius:6px;padding:7px;">
+                    <option value="market">MKT</option><option value="limit">LMT</option>
+                </select>
+                <input id="ordPx" type="number" step="0.01" placeholder="price" style="display:none;width:90px;background:#1b1d1e;color:#f8f8f2;border:1px solid #3e3d32;border-radius:6px;padding:7px;">
+                <button onclick="placeOrder()" style="background:#a6e22e;color:#1b1d1e;border:none;padding:7px 14px;border-radius:6px;cursor:pointer;font-weight:600;">Place Order</button>
+                <span id="ordResult" style="color:#75715e;font-size:13px;"></span>
+            </div>
+        </div>
 
         <!-- Account Stats -->
         <div class="stats-grid">
@@ -242,7 +280,7 @@
 
                 if (positions.length === 0) {
                     document.querySelector('#positionsTable tbody').innerHTML =
-                        '<tr><td colspan="6" style="text-align:center;color:#888;">No positions</td></tr>';
+                        '<tr><td colspan="6" style="text-align:center;color:#75715e;">No positions</td></tr>';
                     return;
                 }
 
@@ -267,7 +305,7 @@
             } catch (e) {
                 console.error('Error loading positions:', e);
                 document.querySelector('#positionsTable tbody').innerHTML =
-                    '<tr><td colspan="6" style="color:#ff6b6b;">Error loading positions</td></tr>';
+                    '<tr><td colspan="6" style="color:#f92672;">Error loading positions</td></tr>';
             }
         }
 
@@ -280,7 +318,7 @@
 
                 if (trades.length === 0) {
                     document.querySelector('#tradesTable tbody').innerHTML =
-                        '<tr><td colspan="6" style="text-align:center;color:#888;">No trades yet</td></tr>';
+                        '<tr><td colspan="6" style="text-align:center;color:#75715e;">No trades yet</td></tr>';
                     return;
                 }
 
@@ -305,7 +343,7 @@
             } catch (e) {
                 console.error('Error loading trades:', e);
                 document.querySelector('#tradesTable tbody').innerHTML =
-                    '<tr><td colspan="6" style="color:#ff6b6b;">Error loading trades</td></tr>';
+                    '<tr><td colspan="6" style="color:#f92672;">Error loading trades</td></tr>';
             }
         }
 
@@ -316,7 +354,7 @@
 
                 if (!data.recommendations || data.recommendations.length === 0) {
                     document.querySelector('#recommendationsTable tbody').innerHTML =
-                        '<tr><td colspan="7" style="text-align:center;color:#888;">No recommendations</td></tr>';
+                        '<tr><td colspan="7" style="text-align:center;color:#75715e;">No recommendations</td></tr>';
                     return;
                 }
 
@@ -339,17 +377,95 @@
             }
         }
 
+        // --- Execution control: DAS status, bot start/stop, manual order ---
+        async function loadDasStatus() {
+            const el = document.getElementById('dasStatus');
+            try {
+                const r = await fetch('/api/das/health');
+                const d = await r.json();
+                if (d.connected && d.login_ok) {
+                    const mode = d.live_firing ? 'LIVE-FIRE' : 'dry-run';
+                    el.textContent = `DAS ${d.account} ✓ (${d.execution_backend}/${mode})`;
+                    el.style.background = '#1b3a1b'; el.style.color = '#a6e22e';
+                } else {
+                    el.textContent = 'DAS: ' + (d.error || 'login failed');
+                    el.style.background = '#3a1b1b'; el.style.color = '#f92672';
+                }
+            } catch (e) { el.textContent = 'DAS: unavailable'; el.style.color = '#f92672'; }
+        }
+        async function loadBotStatus() {
+            try {
+                const d = await (await fetch('/api/bot/status')).json();
+                document.getElementById('botStatus').textContent =
+                    'bot: ' + (d.running ? 'RUNNING' : 'stopped');
+            } catch (e) { document.getElementById('botStatus').textContent = 'bot: ?'; }
+        }
+        async function botControl(action) {
+            try {
+                await fetch('/api/bot/' + action);
+                setTimeout(loadBotStatus, 400);
+            } catch (e) { alert('bot ' + action + ' failed'); }
+        }
+        async function placeOrder() {
+            const body = {
+                symbol: document.getElementById('ordSym').value.toUpperCase(),
+                side: document.getElementById('ordSide').value,
+                quantity: Number(document.getElementById('ordQty').value),
+                order_type: document.getElementById('ordType').value,
+            };
+            if (body.order_type === 'limit') body.price = Number(document.getElementById('ordPx').value);
+            const out = document.getElementById('ordResult');
+            out.textContent = 'sending…';
+            try {
+                const d = await (await fetch('/api/order', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(body)
+                })).json();
+                out.textContent = (d.backend || '') + ' ' + (d.status || d.error || '') +
+                    (d.command ? ' — ' + d.command : '');
+                out.style.color = d.error ? '#f92672' : '#a6e22e';
+                loadPositions(); loadTrades();
+            } catch (e) { out.textContent = 'error'; out.style.color = '#f92672'; }
+        }
+
+        async function loadConfig() {
+            try {
+                const d = await (await fetch('/api/config')).json();
+                document.getElementById('cfgBackend').value = d.execution_backend;
+                const dasOpt = document.querySelector('#cfgBackend option[value="das"]');
+                if (dasOpt && !d.das_available) { dasOpt.disabled = true; dasOpt.textContent += ' (unavailable)'; }
+            } catch (e) { /* ignore */ }
+        }
+        async function saveConfig() {
+            const out = document.getElementById('cfgResult');
+            out.textContent = 'saving…';
+            try {
+                const d = await (await fetch('/api/config', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({execution_backend: document.getElementById('cfgBackend').value})
+                })).json();
+                out.textContent = d.error ? d.error : ('saved → ' + d.updated.execution_backend);
+                out.style.color = d.error ? '#f92672' : '#a6e22e';
+                loadDasStatus();
+            } catch (e) { out.textContent = 'error'; out.style.color = '#f92672'; }
+        }
+
         // Load all data
+        loadConfig();
         loadAccount();
         loadPositions();
         loadTrades();
         loadRecommendations();
+        loadDasStatus();
+        loadBotStatus();
 
         // Auto-refresh every 30 seconds
         setInterval(() => {
             loadAccount();
             loadPositions();
             loadTrades();
+            loadDasStatus();
+            loadBotStatus();
         }, 30000);
     </script>
 </body>

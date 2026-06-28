@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Falcon Diagnostics — API Console</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+         background:linear-gradient(135deg,#1b1d1e 0%,#272822 100%); min-height:100vh;
+         color:#f8f8f2; padding:1rem; }
+  .container { max-width:1200px; margin:0 auto; }
+  header { display:flex; justify-content:space-between; align-items:center; padding:1rem 0;
+           border-bottom:1px solid #272822; margin-bottom:1.5rem; }
+  h1 { color:#f92672; font-size:1.8rem; }
+  .nav-links a { color:#66d9ef; text-decoration:none; margin-left:1.5rem; font-size:0.9rem; }
+  .nav-links a:hover { text-decoration:underline; }
+  h2 { color:#a6e22e; font-size:1rem; margin:1.2rem 0 0.6rem; }
+  .ep { display:flex; align-items:center; gap:10px; padding:7px 0; border-bottom:1px solid #272822;
+        font-size:0.85rem; }
+  .verb { font-weight:700; width:46px; }
+  .get { color:#a6e22e; } .post { color:#fd971f; }
+  .path { color:#f8f8f2; font-family:monospace; flex:1; }
+  button { background:#a6e22e; color:#1b1d1e; border:none; padding:5px 12px; border-radius:6px;
+           cursor:pointer; font-weight:600; font-size:0.8rem; }
+  button.mut { background:#3e3d32; color:#75715e; cursor:not-allowed; }
+  pre { background:#161718; border:1px solid #3e3d32; border-radius:6px; padding:10px; margin-top:6px;
+        max-height:240px; overflow:auto; font-size:0.78rem; color:#cfcfc2; white-space:pre-wrap; }
+  .note { color:#75715e; font-size:0.8rem; margin-bottom:1rem; }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>Diagnostics — API Console</h1>
+    <nav class="nav-links">
+<a href="/">Home</a>
+<a href="/dashboard">Dashboard</a>
+<a href="/analytics">Analytics</a>
+<a href="/backtest-analytics">Backtests</a>
+<a href="/orchestrator">Orchestrator</a>
+<a href="/strategies">Strategies</a>
+<a href="/advisor">Advisor</a>
+<a href="/diagnostics">Diagnostics</a>
+</nav>
+  </header>
+  <p class="note">Every Falcon API endpoint, grouped. GET endpoints are callable here (read-only);
+  mutating endpoints are listed for reference. This page exists so no endpoint is left without a UI
+  surface (issue #4).</p>
+  <div id="list"></div>
+</div>
+<script>
+// Literal endpoint registry — each path is a literal so it has a discoverable UI surface.
+const GET_ENDPOINTS = [
+  ['/api/account','account'], ['/api/positions','positions'], ['/api/trades','trades'],
+  ['/api/trades/summary','trade summary'], ['/api/performance','performance'],
+  ['/api/signals','signals'], ['/api/recommendations','recommendations'],
+  ['/api/recommendations/history','recommendation history'], ['/api/analysis','AI analysis'],
+  ['/api/bot/status','bot status'], ['/api/das/health','DAS health'], ['/api/config','config'],
+  ['/api/strategy','active strategy'], ['/api/strategy/versions','strategy versions'],
+  ['/api/strategies/active','active strategies'], ['/api/strategies/aggregate','strategies aggregate'],
+  ['/api/strategies/leaderboard','strategies leaderboard'],
+  ['/api/charts/equity','chart: equity'], ['/api/charts/pnl','chart: pnl'],
+  ['/api/charts/strategy-comparison','chart: strategy comparison'],
+  ['/api/charts/trade-distribution','chart: trade distribution'],
+  ['/api/feedback/history','feedback history'], ['/api/screener/profiles','screener profiles'],
+  ['/api/backtests/recent','backtests recent'], ['/api/backtests/summary','backtests summary'],
+  ['/api/backtests/daily','backtests daily'],
+];
+const MUTATING = [
+  ['SSE','/api/stream','live updates (Server-Sent Events)'],
+  ['POST','/api/order','place order'], ['POST','/api/bot/start','start bot'],
+  ['POST','/api/bot/stop','stop bot'], ['POST','/api/config','set config'],
+  ['POST','/api/strategy/validate','validate strategy'], ['POST','/api/strategy/backtest','backtest strategy'],
+  ['POST','/api/strategy/deploy','deploy strategy'], ['POST','/api/strategy/rollback','rollback strategy'],
+  ['POST','/api/positions/set-stop-loss','set stop-loss'],
+  ['POST','/api/screener/profiles/export','export profiles'],
+  ['POST','/api/screener/profiles/import','import profiles'],
+  ['POST','/api/screener/profiles/init','init profiles'],
+];
+function row(verb, path, label, callable) {
+  const d = document.createElement('div'); d.className = 'ep';
+  d.innerHTML = `<span class="verb ${verb.toLowerCase()}">${verb}</span>`
+    + `<span class="path">${path}</span><span style="color:#75715e">${label}</span>`;
+  const btn = document.createElement('button');
+  btn.textContent = callable ? 'Call' : verb;
+  if (!callable) btn.className = 'mut';
+  const out = document.createElement('pre'); out.style.display = 'none';
+  if (callable) btn.onclick = async () => {
+    out.style.display = 'block'; out.textContent = 'loading…';
+    try { const r = await fetch(path); out.textContent = JSON.stringify(await r.json(), null, 2); }
+    catch (e) { out.textContent = 'error: ' + e; }
+  };
+  d.appendChild(btn);
+  const wrap = document.createElement('div'); wrap.appendChild(d); wrap.appendChild(out);
+  return wrap;
+}
+const list = document.getElementById('list');
+const g = document.createElement('h2'); g.textContent = 'GET (read-only — callable)'; list.appendChild(g);
+GET_ENDPOINTS.forEach(([p,l]) => list.appendChild(row('GET', p, l, true)));
+const m = document.createElement('h2'); m.textContent = 'POST / mutating (reference)'; list.appendChild(m);
+MUTATING.forEach(([v,p,l]) => list.appendChild(row(v, p, l, false)));
+</script>
+</body>
+</html>

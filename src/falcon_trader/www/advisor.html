@@ -7,70 +7,70 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/diff2html/bundles/css/diff2html.min.css">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0a0e17; color: #e0e0e0; }
-        .nav { background: #111827; padding: 12px 24px; display: flex; gap: 20px; align-items: center; border-bottom: 1px solid #1f2937; }
-        .nav a { color: #9ca3af; text-decoration: none; font-size: 14px; }
-        .nav a:hover, .nav a.active { color: #60a5fa; }
-        .nav .brand { color: #f59e0b; font-weight: bold; font-size: 18px; margin-right: 20px; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #161718; color: #f8f8f2; }
+        .nav { background: #1b1d1e; padding: 12px 24px; display: flex; gap: 20px; align-items: center; border-bottom: 1px solid #272822; }
+        .nav a { color: #75715e; text-decoration: none; font-size: 14px; }
+        .nav a:hover, .nav a.active { color: #a6e22e; }
+        .nav .brand { color: #fd971f; font-weight: bold; font-size: 18px; margin-right: 20px; }
         .container { max-width: 1400px; margin: 0 auto; padding: 24px; }
         h1 { font-size: 24px; margin-bottom: 8px; }
-        .subtitle { color: #9ca3af; margin-bottom: 24px; }
+        .subtitle { color: #75715e; margin-bottom: 24px; }
 
         .tabs { display: flex; gap: 4px; margin-bottom: 24px; }
-        .tab { padding: 8px 16px; background: #1f2937; border: 1px solid #374151; border-radius: 6px; cursor: pointer; color: #9ca3af; font-size: 14px; }
-        .tab.active { background: #1e3a5f; border-color: #3b82f6; color: #60a5fa; }
+        .tab { padding: 8px 16px; background: #272822; border: 1px solid #3e3d32; border-radius: 6px; cursor: pointer; color: #75715e; font-size: 14px; }
+        .tab.active { background: #272822; border-color: #a6e22e; color: #a6e22e; }
 
         .panel { display: none; }
         .panel.active { display: block; }
 
         table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-        th { text-align: left; padding: 10px 12px; background: #111827; color: #9ca3af; font-size: 12px; text-transform: uppercase; border-bottom: 1px solid #1f2937; }
-        td { padding: 10px 12px; border-bottom: 1px solid #1f2937; font-size: 14px; }
-        tr:hover { background: #111827; }
+        th { text-align: left; padding: 10px 12px; background: #1b1d1e; color: #75715e; font-size: 12px; text-transform: uppercase; border-bottom: 1px solid #272822; }
+        td { padding: 10px 12px; border-bottom: 1px solid #272822; font-size: 14px; }
+        tr:hover { background: #1b1d1e; }
 
         .badge { padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 500; }
-        .badge-pending { background: #92400e; color: #fbbf24; }
-        .badge-approved { background: #065f46; color: #34d399; }
-        .badge-rejected { background: #991b1b; color: #fca5a5; }
+        .badge-pending { background: #8a5a1f; color: #e6db74; }
+        .badge-approved { background: #4d5a1f; color: #a6e22e; }
+        .badge-rejected { background: #8a1538; color: #f97199; }
 
         .btn { padding: 6px 14px; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500; }
-        .btn-approve { background: #065f46; color: #34d399; }
-        .btn-approve:hover { background: #047857; }
-        .btn-reject { background: #991b1b; color: #fca5a5; }
-        .btn-reject:hover { background: #b91c1c; }
-        .btn-backtest { background: #1e3a5f; color: #60a5fa; }
-        .btn-backtest:hover { background: #1e40af; }
-        .btn-view { background: #374151; color: #d1d5db; }
-        .btn-view:hover { background: #4b5563; }
+        .btn-approve { background: #4d5a1f; color: #a6e22e; }
+        .btn-approve:hover { background: #5a7a1e; }
+        .btn-reject { background: #8a1538; color: #f97199; }
+        .btn-reject:hover { background: #a01243; }
+        .btn-backtest { background: #272822; color: #a6e22e; }
+        .btn-backtest:hover { background: #3a6ea5; }
+        .btn-view { background: #3e3d32; color: #cfcfc2; }
+        .btn-view:hover { background: #49483e; }
 
-        .card { background: #111827; border: 1px solid #1f2937; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+        .card { background: #1b1d1e; border: 1px solid #272822; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
         .card h3 { font-size: 16px; margin-bottom: 8px; }
         .card .metric { font-size: 24px; font-weight: bold; }
-        .card .label { font-size: 12px; color: #9ca3af; }
+        .card .label { font-size: 12px; color: #75715e; }
         .cards-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 16px; margin-bottom: 24px; }
 
         .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 1000; justify-content: center; align-items: center; }
         .modal-overlay.open { display: flex; }
-        .modal { background: #1f2937; border: 1px solid #374151; border-radius: 12px; width: 90%; max-width: 1200px; max-height: 90vh; overflow-y: auto; padding: 24px; }
+        .modal { background: #272822; border: 1px solid #3e3d32; border-radius: 12px; width: 90%; max-width: 1200px; max-height: 90vh; overflow-y: auto; padding: 24px; }
         .modal h2 { margin-bottom: 16px; }
-        .modal .close { float: right; background: none; border: none; color: #9ca3af; font-size: 24px; cursor: pointer; }
+        .modal .close { float: right; background: none; border: none; color: #75715e; font-size: 24px; cursor: pointer; }
 
-        .diff-container { background: #0d1117; border-radius: 8px; overflow: auto; max-height: 500px; margin: 16px 0; }
+        .diff-container { background: #1b1d1e; border-radius: 8px; overflow: auto; max-height: 500px; margin: 16px 0; }
         .comparison { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0; }
-        .comparison .col { background: #111827; padding: 12px; border-radius: 8px; }
-        .comparison .col h4 { margin-bottom: 8px; color: #9ca3af; font-size: 13px; }
+        .comparison .col { background: #1b1d1e; padding: 12px; border-radius: 8px; }
+        .comparison .col h4 { margin-bottom: 8px; color: #75715e; font-size: 13px; }
         .comparison .value { font-size: 20px; font-weight: bold; }
-        .positive { color: #34d399; }
-        .negative { color: #f87171; }
-        .neutral { color: #9ca3af; }
+        .positive { color: #a6e22e; }
+        .negative { color: #f92672; }
+        .neutral { color: #75715e; }
 
-        .budget-bar { height: 8px; background: #374151; border-radius: 4px; margin-top: 6px; }
-        .budget-bar .fill { height: 100%; border-radius: 4px; background: #3b82f6; }
-        .budget-bar .fill.warning { background: #f59e0b; }
-        .budget-bar .fill.danger { background: #ef4444; }
+        .budget-bar { height: 8px; background: #3e3d32; border-radius: 4px; margin-top: 6px; }
+        .budget-bar .fill { height: 100%; border-radius: 4px; background: #a6e22e; }
+        .budget-bar .fill.warning { background: #fd971f; }
+        .budget-bar .fill.danger { background: #f92672; }
 
-        .empty-state { text-align: center; padding: 60px 20px; color: #6b7280; }
-        .empty-state h3 { font-size: 18px; margin-bottom: 8px; color: #9ca3af; }
+        .empty-state { text-align: center; padding: 60px 20px; color: #75715e; }
+        .empty-state h3 { font-size: 18px; margin-bottom: 8px; color: #75715e; }
     </style>
 </head>
 <body>
@@ -98,7 +98,7 @@
         <!-- Proposals Panel -->
         <div id="proposals-panel" class="panel active">
             <div style="margin-bottom: 16px;">
-                <select id="status-filter" style="background:#1f2937;color:#e0e0e0;border:1px solid #374151;padding:6px 12px;border-radius:4px;">
+                <select id="status-filter" style="background:#272822;color:#f8f8f2;border:1px solid #3e3d32;padding:6px 12px;border-radius:4px;">
                     <option value="pending">Pending</option>
                     <option value="approved">Approved</option>
                     <option value="rejected">Rejected</option>
@@ -251,10 +251,10 @@
                 const c = currentLines[i];
                 const p = proposedLines[i];
                 if (c === p) {
-                    html += `<span style="color:#8b949e"> ${esc(c || '')}</span>\n`;
+                    html += `<span style="color:#75715e"> ${esc(c || '')}</span>\n`;
                 } else {
-                    if (c !== undefined) html += `<span style="color:#f85149">-${esc(c)}</span>\n`;
-                    if (p !== undefined) html += `<span style="color:#3fb950">+${esc(p)}</span>\n`;
+                    if (c !== undefined) html += `<span style="color:#f92672">-${esc(c)}</span>\n`;
+                    if (p !== undefined) html += `<span style="color:#a6e22e">+${esc(p)}</span>\n`;
                 }
             }
             html += '</pre>';

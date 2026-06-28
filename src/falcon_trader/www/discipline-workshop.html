@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Discipline Workshop — Falcon</title>
+<style>
+  :root{--bg:#0f172a;--panel:#111c31;--bd:#1f2d45;--mut:#94a3b8;--win:#19c37d;--loss:#ef4444;--none:#243049;--accent:#3b82f6}
+  *{box-sizing:border-box} body{margin:0;background:var(--bg);color:#e8edf6;font:14px/1.5 "Plus Jakarta Sans",system-ui,sans-serif}
+  header{padding:18px 24px;border-bottom:1px solid var(--bd);display:flex;align-items:center;gap:18px;flex-wrap:wrap}
+  h1{font-size:18px;margin:0;font-weight:700} h1 small{color:var(--mut);font-weight:400;font-size:12px}
+  .nav{display:flex;gap:6px;align-items:center} button{background:var(--panel);color:#e8edf6;border:1px solid var(--bd);border-radius:8px;padding:6px 12px;cursor:pointer;font-size:14px}
+  button:hover{border-color:var(--accent)} #month{font-weight:600;min-width:130px;text-align:center}
+  .tally{margin-left:auto;display:flex;gap:18px;align-items:center;flex-wrap:wrap}
+  .pill{padding:4px 12px;border-radius:999px;border:1px solid var(--bd);font-weight:600}
+  .pill.win{color:var(--win);border-color:#15543b} .pill.loss{color:var(--loss);border-color:#5b2020}
+  .grad{font-size:12px;color:var(--mut)} .grad b{color:#e8edf6}
+  main{display:flex;gap:20px;padding:24px;flex-wrap:wrap}
+  .cal{flex:1 1 560px;min-width:340px}
+  .dow{display:grid;grid-template-columns:repeat(7,1fr);gap:8px;margin-bottom:8px;color:var(--mut);font-size:12px;text-align:center}
+  .grid{display:grid;grid-template-columns:repeat(7,1fr);gap:8px}
+  .cell{aspect-ratio:1;border:1px solid var(--bd);border-radius:10px;padding:8px;background:var(--panel);position:relative;cursor:default;display:flex;flex-direction:column}
+  .cell.has{cursor:pointer} .cell.has:hover{border-color:var(--accent)}
+  .cell.win{background:linear-gradient(160deg,rgba(25,195,125,.16),var(--panel));border-color:#1c6647}
+  .cell.loss{background:linear-gradient(160deg,rgba(239,68,68,.16),var(--panel));border-color:#6b2626}
+  .cell.empty{background:transparent;border:none}
+  .dnum{font-size:12px;color:var(--mut)} .res{margin-top:auto;font-weight:700;font-size:13px}
+  .res.win{color:var(--win)} .res.loss{color:var(--loss)} .rr{font-size:11px;color:var(--mut)}
+  .detail{flex:1 1 320px;min-width:300px;background:var(--panel);border:1px solid var(--bd);border-radius:12px;padding:18px;max-width:480px}
+  .detail h2{margin:0 0 4px;font-size:16px} .detail .sub{color:var(--mut);font-size:12px;margin-bottom:14px}
+  .badge{display:inline-block;padding:3px 10px;border-radius:999px;font-weight:700;font-size:12px}
+  .badge.win{background:rgba(25,195,125,.18);color:var(--win)} .badge.loss{background:rgba(239,68,68,.18);color:var(--loss)}
+  .kv{margin:10px 0} .kv .k{color:var(--mut);font-size:11px;text-transform:uppercase;letter-spacing:.5px}
+  .tk{display:flex;gap:8px;font-size:13px;padding:3px 0;border-bottom:1px solid var(--bd)} .tk .g{margin-left:auto;color:var(--mut)}
+  .muted{color:var(--mut)} a{color:var(--accent)}
+  .note{padding:10px 24px;color:var(--mut);font-size:12px;border-top:1px solid var(--bd)}
+</style></head>
+<body>
+<header>
+  <h1>🎯 Discipline Workshop <small>plan-adherence WIN/LOSS · MIC</small></h1>
+  <div class="nav"><button onclick="shift(-1)">‹</button><span id="month">—</span><button onclick="shift(1)">›</button></div>
+  <div class="tally" id="tally"></div>
+</header>
+<main>
+  <div class="cal">
+    <div class="dow"><div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div></div>
+    <div class="grid" id="grid"></div>
+  </div>
+  <div class="detail" id="detail"><span class="muted">Select a graded day to see the plan-vs-reality review.</span></div>
+</main>
+<div class="note">Canonical store: DynamoDB <code>falcon-trades</code> (<code>DW#YYYY-MM</code>) + S3 <code>davdunc-pai-backup/discipline-workshop/</code>. This view reads the postgres mirror. Graduation = moderator vote.</div>
+<script>
+let cur = new Date(); let cache = {};
+const pad = n => String(n).padStart(2,'0');
+const ym = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}`;
+function shift(n){ cur = new Date(cur.getFullYear(), cur.getMonth()+n, 1); load(); }
+async function load(){
+  const m = ym(cur);
+  document.getElementById('month').textContent = cur.toLocaleString('en',{month:'long',year:'numeric'});
+  let data;
+  try { data = await (await fetch(`/api/discipline-workshop/${m}`)).json(); }
+  catch(e){ document.getElementById('grid').innerHTML = '<div class="muted">API error</div>'; return; }
+  const byDate = {}; (data.days||[]).forEach(d=>byDate[d.date]=d); cache = byDate;
+  // tally
+  const t = data.tally||{}, g = data.graduation||{};
+  document.getElementById('tally').innerHTML =
+    `<span class="pill win">${t.wins||0} W</span><span class="pill loss">${t.losses||0} L</span>`+
+    `<span class="grad">Adherence <b>${t.adherence_rate!=null?Math.round(t.adherence_rate*100)+'%':'—'}</b></span>`+
+    `<span class="grad">Graduation <b>${g.status||'in-progress'}</b> <span class="muted">(${g.method||'moderator-vote'})</span></span>`;
+  // grid
+  const first = new Date(cur.getFullYear(), cur.getMonth(), 1);
+  const days = new Date(cur.getFullYear(), cur.getMonth()+1, 0).getDate();
+  let html = '';
+  for(let i=0;i<first.getDay();i++) html += '<div class="cell empty"></div>';
+  for(let d=1; d<=days; d++){
+    const ds = `${m}-${pad(d)}`; const rec = byDate[ds];
+    const cls = rec ? rec.discipline_result==='WIN'?'win':rec.discipline_result==='LOSS'?'loss':'' : '';
+    const r = rec && rec.combined_r!=null ? `<span class="rr">${rec.combined_r>=0?'+':''}${rec.combined_r}R</span>` : '';
+    const res = rec ? `<div class="res ${cls}">${rec.discipline_result||''} ${r}</div>` : '';
+    html += `<div class="cell ${cls} ${rec?'has':''}" ${rec?`onclick="show('${ds}')"`:''}><div class="dnum">${d}</div>${res}</div>`;
+  }
+  document.getElementById('grid').innerHTML = html;
+}
+function show(ds){
+  const r = cache[ds]; if(!r) return;
+  const plan = (r.plan||[]).map(p=>`${p.ticker} ${p.bias||''}${p.role?' ('+p.role+')':''}`).join(', ') || '—';
+  const tks = (r.tickers||[]).map(t=>`<div class="tk"><span>${t.symbol}</span><span class="muted">${t.account||''}</span><span>${t.note||''}</span><span class="g">${t.grade||''}</span></div>`).join('') || '<span class="muted">none</span>';
+  const b = r.discipline_result==='WIN'?'win':'loss';
+  document.getElementById('detail').innerHTML = `
+    <h2>${ds} <span class="badge ${b}">${r.discipline_result||'—'}</span></h2>
+    <div class="sub">${r.dow||''} · ${r.overview||''}</div>
+    <div class="kv"><div class="k">Goal</div>${r.goal||'—'}</div>
+    <div class="kv"><div class="k">Planned watchlist</div>${plan}</div>
+    <div class="kv"><div class="k">Traded</div>${tks}</div>
+    <div class="kv"><div class="k">Learned</div>${r.learned||'—'}</div>
+    <div class="kv"><div class="k">Change</div>${r.changes||'—'}</div>
+    <div class="kv"><div class="k">R / submitted</div>${r.combined_r!=null?(r.combined_r>=0?'+':'')+r.combined_r+'R':'—'} · MIC: ${r.submitted_to_mic?'✅ submitted':'❌ not submitted'}</div>
+    ${r.s3_artifact?`<div class="kv"><a href="${r.s3_artifact}" target="_blank">🔒 Full review →</a></div>`:''}`;
+}
+load();
+</script>
+</body></html>

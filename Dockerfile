@@ -1,10 +1,11 @@
-FROM python:3.11-slim
+# Fedora-native base (mandate: Fedora base OS for every part of the solution)
+FROM registry.fedoraproject.org/fedora:42
 
 WORKDIR /app
 
-# git is needed to pip-install falcon-core from GitHub
-RUN apt-get update && apt-get install -y --no-install-recommends git \
-    && rm -rf /var/lib/apt/lists/*
+# git for pip git+ installs; gcc/python3-devel for any sdist builds
+RUN dnf -y install python3 python3-pip python3-devel gcc git \
+    && dnf clean all && rm -rf /var/cache/dnf
 
 # Upgrade pip for better download handling
 RUN pip install --upgrade pip

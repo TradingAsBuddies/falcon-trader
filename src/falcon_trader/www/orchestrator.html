@@ -8,9 +8,9 @@
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            background: linear-gradient(135deg, #1b1d1e 0%, #272822 100%);
             min-height: 100vh;
-            color: #e4e4e4;
+            color: #f8f8f2;
             padding: 1rem;
         }
         .container { max-width: 1400px; margin: 0 auto; }
@@ -19,26 +19,26 @@
         header {
             text-align: center;
             padding: 2rem 0;
-            border-bottom: 2px solid #00d4ff;
+            border-bottom: 2px solid #a6e22e;
             margin-bottom: 2rem;
         }
         h1 {
             font-size: 2rem;
-            color: #00d4ff;
+            color: #f92672;
             margin-bottom: 0.5rem;
             text-shadow: 0 0 10px rgba(0, 212, 255, 0.3);
         }
-        .subtitle { color: #888; font-size: 0.9rem; }
+        .subtitle { color: #75715e; font-size: 0.9rem; }
         .status-badge {
             display: inline-block;
             padding: 0.3rem 0.8rem;
             background: rgba(0, 255, 0, 0.2);
-            border: 1px solid #0f0;
+            border: 1px solid #a6e22e;
             border-radius: 20px;
             font-size: 0.8rem;
             margin-top: 0.5rem;
         }
-        .status-badge.active { color: #0f0; }
+        .status-badge.active { color: #a6e22e; }
 
         /* Grid Layout */
         .grid {
@@ -53,11 +53,11 @@
             background: rgba(255,255,255,0.05);
             border-radius: 12px;
             padding: 1.5rem;
-            border: 1px solid #333;
+            border: 1px solid #272822;
             backdrop-filter: blur(10px);
         }
         .card h2 {
-            color: #00d4ff;
+            color: #a6e22e;
             margin-bottom: 1rem;
             font-size: 1.3rem;
             display: flex;
@@ -74,14 +74,14 @@
             border-bottom: 1px solid rgba(255,255,255,0.1);
         }
         .metric:last-child { border-bottom: none; }
-        .metric-label { color: #999; font-size: 0.9rem; }
+        .metric-label { color: #75715e; font-size: 0.9rem; }
         .metric-value {
             color: #fff;
             font-weight: 600;
             font-size: 1.1rem;
         }
-        .metric-value.positive { color: #0f0; }
-        .metric-value.negative { color: #f44; }
+        .metric-value.positive { color: #a6e22e; }
+        .metric-value.negative { color: #f92672; }
 
         /* Positions Table */
         table {
@@ -91,12 +91,12 @@
         }
         th {
             background: rgba(0, 212, 255, 0.1);
-            color: #00d4ff;
+            color: #a6e22e;
             padding: 0.8rem;
             text-align: left;
             font-size: 0.85rem;
             font-weight: 600;
-            border-bottom: 2px solid #00d4ff;
+            border-bottom: 2px solid #a6e22e;
         }
         td {
             padding: 0.8rem;
@@ -106,12 +106,12 @@
         tr:hover { background: rgba(0, 212, 255, 0.05); }
         .ticker {
             font-weight: 700;
-            color: #00d4ff;
+            color: #a6e22e;
             font-size: 1rem;
         }
-        .pnl-positive { color: #0f0; font-weight: 600; }
-        .pnl-negative { color: #f44; font-weight: 600; }
-        .pnl-neutral { color: #999; }
+        .pnl-positive { color: #a6e22e; font-weight: 600; }
+        .pnl-negative { color: #f92672; font-weight: 600; }
+        .pnl-neutral { color: #75715e; }
 
         /* Recent Orders */
         .order-item {
@@ -119,7 +119,7 @@
             background: rgba(255,255,255,0.03);
             border-radius: 8px;
             margin-bottom: 0.8rem;
-            border-left: 3px solid #00d4ff;
+            border-left: 3px solid #a6e22e;
         }
         .order-header {
             display: flex;
@@ -128,7 +128,7 @@
         }
         .order-symbol {
             font-weight: 700;
-            color: #00d4ff;
+            color: #a6e22e;
             font-size: 1.1rem;
         }
         .order-type {
@@ -137,17 +137,17 @@
             font-size: 0.75rem;
             font-weight: 600;
         }
-        .order-type.buy { background: rgba(0, 255, 0, 0.2); color: #0f0; }
-        .order-type.sell { background: rgba(255, 0, 0, 0.2); color: #f44; }
+        .order-type.buy { background: rgba(0, 255, 0, 0.2); color: #a6e22e; }
+        .order-type.sell { background: rgba(255, 0, 0, 0.2); color: #f92672; }
         .order-details {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
             gap: 0.5rem;
             font-size: 0.85rem;
-            color: #999;
+            color: #75715e;
         }
         .order-detail-item { }
-        .order-detail-label { color: #666; font-size: 0.75rem; }
+        .order-detail-label { color: #75715e; font-size: 0.75rem; }
         .order-detail-value { color: #fff; font-weight: 600; }
 
         /* AI Recommendations */
@@ -166,7 +166,7 @@
         }
         .rec-ticker {
             font-weight: 700;
-            color: #00d4ff;
+            color: #a6e22e;
             font-size: 1.2rem;
         }
         .confidence-badge {
@@ -175,12 +175,12 @@
             font-size: 0.75rem;
             font-weight: 600;
         }
-        .conf-high { background: rgba(0, 255, 0, 0.2); color: #0f0; }
-        .conf-med { background: rgba(255, 165, 0, 0.2); color: #fa0; }
-        .conf-low { background: rgba(255, 0, 0, 0.2); color: #f44; }
+        .conf-high { background: rgba(0, 255, 0, 0.2); color: #a6e22e; }
+        .conf-med { background: rgba(255, 165, 0, 0.2); color: #fd971f; }
+        .conf-low { background: rgba(255, 0, 0, 0.2); color: #f92672; }
         .rec-details {
             font-size: 0.85rem;
-            color: #ccc;
+            color: #cfcfc2;
             line-height: 1.5;
         }
         .rec-prices {
@@ -189,13 +189,13 @@
             margin-top: 0.5rem;
             font-size: 0.85rem;
         }
-        .price-item { color: #999; }
+        .price-item { color: #75715e; }
         .price-value { color: #fff; font-weight: 600; }
 
         /* Refresh Button */
         .refresh-btn {
-            background: #00d4ff;
-            color: #1a1a2e;
+            background: #a6e22e;
+            color: #1b1d1e;
             border: none;
             padding: 0.5rem 1.2rem;
             border-radius: 6px;
@@ -205,7 +205,7 @@
             transition: all 0.2s;
         }
         .refresh-btn:hover {
-            background: #00b8e6;
+            background: #5a7a1e;
             transform: translateY(-1px);
         }
 
@@ -213,13 +213,13 @@
         .loading {
             text-align: center;
             padding: 2rem;
-            color: #666;
+            color: #75715e;
         }
 
         /* Timestamp */
         .timestamp {
             text-align: center;
-            color: #666;
+            color: #75715e;
             font-size: 0.8rem;
             margin-top: 2rem;
         }
@@ -232,7 +232,7 @@
             margin-bottom: 1rem;
         }
         .nav a {
-            color: #00d4ff;
+            color: #a6e22e;
             text-decoration: none;
             padding: 0.5rem 1rem;
             border-radius: 6px;
@@ -245,7 +245,9 @@
             background: rgba(0, 212, 255, 0.2);
             font-weight: 600;
         }
-    </style>
+      .nav-links a { color:#66d9ef; text-decoration:none; margin-left:1.25rem; font-size:0.9rem; }
+  .nav-links a:hover { text-decoration:underline; }
+</style>
 </head>
 <body>
     <div class="container">
@@ -253,7 +255,18 @@
             <h1>🚀 Falcon Multi-Strategy Orchestrator</h1>
             <p class="subtitle">AI-Powered Automated Trading System</p>
             <span class="status-badge active" id="systemStatus">● ACTIVE</span>
-        </header>
+        <nav class="nav-links">
+<a href="/">Home</a>
+<a href="/dashboard">Dashboard</a>
+<a href="/analytics">Analytics</a>
+<a href="/backtest-analytics">Backtests</a>
+<a href="/orchestrator">Orchestrator</a>
+<a href="/strategies">Strategies</a>
+<a href="/advisor">Advisor</a>
+<a href="/signals-risk">Signal/Risk</a>
+<a href="/diagnostics">Diagnostics</a>
+</nav>
+</header>
 
         <div class="nav">
             <a href="/" class="active">Orchestrator</a>
@@ -282,15 +295,15 @@
                 <div id="activeStrategies">
                     <div class="metric">
                         <span class="metric-label">RSI Mean Reversion</span>
-                        <span class="metric-value" style="color: #0f0;">ACTIVE</span>
+                        <span class="metric-value" style="color: #a6e22e;">ACTIVE</span>
                     </div>
                     <div class="metric">
                         <span class="metric-label">Momentum Breakout</span>
-                        <span class="metric-value" style="color: #0f0;">ACTIVE</span>
+                        <span class="metric-value" style="color: #a6e22e;">ACTIVE</span>
                     </div>
                     <div class="metric">
                         <span class="metric-label">Bollinger Bands</span>
-                        <span class="metric-value" style="color: #0f0;">ACTIVE</span>
+                        <span class="metric-value" style="color: #a6e22e;">ACTIVE</span>
                     </div>
                 </div>
             </div>
@@ -384,7 +397,7 @@
                 const positions = await response.json();
 
                 if (positions.length === 0) {
-                    document.getElementById('positionsTable').innerHTML = '<p style="text-align:center; color:#666; padding:2rem;">No open positions</p>';
+                    document.getElementById('positionsTable').innerHTML = '<p style="text-align:center; color:#75715e; padding:2rem;">No open positions</p>';
                     return;
                 }
 
@@ -436,7 +449,7 @@
                 const orders = await response.json();
 
                 if (orders.length === 0) {
-                    document.getElementById('recentOrders').innerHTML = '<p style="text-align:center; color:#666; padding:2rem;">No orders yet</p>';
+                    document.getElementById('recentOrders').innerHTML = '<p style="text-align:center; color:#75715e; padding:2rem;">No orders yet</p>';
                     return;
                 }
 
@@ -482,7 +495,7 @@
                 const data = await response.json();
 
                 if (data.status !== 'success' || data.recommendations.length === 0) {
-                    document.getElementById('aiRecommendations').innerHTML = '<p style="text-align:center; color:#666; padding:2rem;">No recommendations available</p>';
+                    document.getElementById('aiRecommendations').innerHTML = '<p style="text-align:center; color:#75715e; padding:2rem;">No recommendations available</p>';
                     return;
                 }
 
