@@ -1,6 +1,7 @@
 import os
 from flask import Flask, jsonify, send_file, request, redirect
 from flask_cors import CORS
+from werkzeug.exceptions import HTTPException
 import json
 import threading
 import time
@@ -57,6 +58,19 @@ RUNTIME_CONFIG = {
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for web dashboard
+
+
+@app.errorhandler(Exception)
+def handle_uncaught_exception(e):
+    """Return JSON (never an HTML error page) for any error raised on an /api/*
+    route, so JSON clients never choke on a '<!doctype html>' body. Non-API
+    routes keep Flask's default HTML error behavior."""
+    if request.path.startswith('/api/'):
+        code = e.code if isinstance(e, HTTPException) else 500
+        return jsonify({"status": "error", "error": str(e)}), code
+    if isinstance(e, HTTPException):
+        return e
+    raise e
 
 # Global bot instance
 bot = None
@@ -456,24 +470,82 @@ def get_performance():
 
 @app.route('/api/signals')
 def get_signals():
-    """Get current trading signals"""
+    """Current trading signals (hybrid). Primary source: the latest per-symbol
+    strategy signal the orchestrator logs to strategy_signals. Fallback: directional
+    signals derived from the persisted intraday-scanner setups (same source as
+    /api/recommendations) when no strategy signals have been logged yet.
+
+    The dashboard process has no in-process market-data feed, so signals come from
+    persisted data, never live in-process TA."""
     if not bot:
         return jsonify({"error": "Bot not initialized"}), 503
-    
-    signals = []
-    for symbol in bot.symbols:
-        df = bot.data_feed.get_aggregates(symbol, multiplier=5, timespan="minute", limit=100)
-        if not df.empty:
-            analysis = bot.strategies[symbol].analyze(df)
-            signals.append({
-                "symbol": symbol,
-                "signal": analysis['signal'],
-                "reason": analysis['reason'],
-                "confidence": analysis['confidence'],
-                "indicators": analysis['indicators']
-            })
-    
-    return jsonify(signals)
+
+    try:
+        # --- Primary: orchestrator-logged strategy signals, latest per symbol. ---
+        try:
+            rows = db.execute(
+                """SELECT DISTINCT ON (symbol) symbol, signal_type, signal_reason,
+                          confidence, market_price, action_taken, timestamp
+                     FROM strategy_signals
+                    ORDER BY symbol, timestamp DESC""",
+                fetch='all') or []
+        except Exception:
+            rows = []  # table missing/empty -> fall through to scanner
+
+        if rows:
+            signals = [{
+                "symbol": r.get('symbol'),
+                "signal": (r.get('signal_type') or '').upper(),
+                "reason": r.get('signal_reason'),
+                "confidence": float(r.get('confidence')) if r.get('confidence') is not None else None,
+                "price": float(r.get('market_price')) if r.get('market_price') is not None else None,
+                "action_taken": r.get('action_taken'),
+                "timestamp": str(r.get('timestamp')) if r.get('timestamp') else None,
+            } for r in rows]
+            return jsonify({"signals": signals, "status": "success", "source": "strategy_signals"})
+
+        # --- Fallback: derive directional signals from persisted scanner setups. ---
+        from falcon_screener.profile_manager import ProfileManager
+        manager = ProfileManager(db)
+        best = {}        # symbol -> highest-confidence candidate
+        recency = None
+        for profile in manager.list_profiles(enabled_only=True):
+            runs = manager.get_profile_runs(profile.id, days=1)
+            if not runs:
+                continue
+            run_data = runs[0].get('run_data', {}) or {}
+            for rec in run_data.get('recommendations', []):
+                ticker = rec.get('ticker')
+                if not ticker:
+                    continue
+                recency = recency or rec.get('data_recency')
+                direction = (rec.get('direction') or '').lower()
+                signal = 'BUY' if direction in ('long', 'buy') else \
+                         'SELL' if direction in ('short', 'sell') else 'WATCH'
+                cand = {
+                    "symbol": ticker,
+                    "signal": signal,
+                    "reason": rec.get('trigger_detail') or rec.get('reasoning'),
+                    "confidence": rec.get('confidence_score'),
+                    "setup_type": rec.get('setup_type'),
+                    "entry": rec.get('entry') or rec.get('entry_price_range'),
+                    "stop": rec.get('stop') or rec.get('stop_loss'),
+                    "target": rec.get('target') or rec.get('target_price'),
+                    "data_recency": rec.get('data_recency'),
+                }
+                existing = best.get(ticker)
+                if not existing or (cand.get('confidence') or 0) > (existing.get('confidence') or 0):
+                    best[ticker] = cand
+
+        signals = sorted(best.values(), key=lambda s: (s.get('confidence') or 0), reverse=True)
+        if signals:
+            return jsonify({"signals": signals, "status": "success",
+                            "source": "scanner", "data_recency": recency})
+
+        return jsonify({"signals": [], "status": "no_data",
+                        "reason": "no strategy signals logged and no recent scanner setups"})
+    except Exception as e:
+        return jsonify({"signals": [], "status": "error", "error": str(e)}), 500
 
 @app.route('/api/bot/status')
 def get_bot_status():
@@ -518,8 +590,21 @@ def get_ai_analysis():
     if not bot:
         return jsonify({"error": "Bot not initialized"}), 503
 
-    analysis = bot.get_ai_analysis()
-    return jsonify({"analysis": analysis})
+    # Graceful degradation: get_ai_analysis() is not implemented on the current
+    # PaperTradingBot. Return an explicit "unavailable" payload instead of a 500
+    # until the AI analysis feature is implemented.
+    if not hasattr(bot, 'get_ai_analysis'):
+        return jsonify({
+            "analysis": None,
+            "status": "unavailable",
+            "reason": "AI analysis not implemented on bot"
+        })
+
+    try:
+        analysis = bot.get_ai_analysis()
+        return jsonify({"analysis": analysis})
+    except Exception as e:
+        return jsonify({"analysis": None, "status": "error", "error": str(e)}), 500
 
 
 @app.route('/api/recommendations')
@@ -641,13 +726,56 @@ def get_recommendations():
                 "data_recency": scan.get("data_recency"),
             })
 
+        # ---- RECENCY / EXPIRY GATE (falcon-trader #7) -----------------------
+        # Never serve a setup whose validity window has closed (valid_until in
+        # the past) or whose data is flagged STALE as a LIVE, actionable
+        # suggestion. Acting on an expired/stale signal is the exact failure
+        # this gate prevents. Non-actionable setups are still returned under a
+        # separate key (not silently dropped) so the UI can show them as DEAD.
+        from datetime import datetime as _dt
+        try:
+            from zoneinfo import ZoneInfo as _ZI
+            _now_et = _dt.now(_ZI("America/New_York"))
+        except Exception:
+            from datetime import timezone as _tz
+            _now_et = _dt.now(_tz.utc)
+
+        def _is_expired(rec):
+            vu = rec.get('valid_until')
+            if not vu:
+                return False
+            try:
+                end = _dt.fromisoformat(str(vu))
+            except Exception:
+                return False
+            if end.tzinfo is None:
+                return False
+            return _now_et > end
+
+        _top_stale = 'STALE' in str(scan.get('data_recency') or '')
+        for _rec in merged:
+            _exp = _is_expired(_rec)
+            _stale = _top_stale or 'STALE' in str(_rec.get('data_recency') or '')
+            _rec['expired'] = _exp
+            _rec['actionable'] = not (_exp or _stale)
+
+        live = [r for r in merged if r.get('actionable')]
+        expired_recs = [r for r in merged if not r.get('actionable')]
+
         return jsonify({
             "status": "success",
             "timestamp": latest_timestamp,
             "screen_type": "multi-profile",
             "total_stocks_screened": total_stocks,
             "profiles_run": profiles_run,
-            "recommendations": merged,
+            # Only LIVE, in-window setups are served as actionable suggestions.
+            "recommendations": live,
+            "expired_recommendations": expired_recs,
+            "actionable_count": len(live),
+            "expired_count": len(expired_recs),
+            "message": (None if live else
+                        "No live setups — all are past their validity window or "
+                        "flagged STALE. Do NOT trade these."),
             # Top-level recency/provenance (mandatory honest-staleness labeling).
             "data_source": scan.get("data_source", "flatfiles"),
             "session_date": scan.get("session_date"),
@@ -764,6 +892,54 @@ def serve_trading_dashboard():
 def serve_orchestrator():
     """Serve the orchestrator dashboard"""
     return send_file('www/orchestrator.html')
+
+
+@app.route('/discipline-workshop')
+@app.route('/discipline-workshop.html')
+def serve_discipline_workshop():
+    """Serve the MIC Discipline Workshop calendar page."""
+    return send_file('www/discipline-workshop.html')
+
+
+@app.route('/api/discipline-workshop/<month>')
+def get_discipline_workshop(month):
+    """A month of Discipline Workshop records (plan-adherence WIN/LOSS), read from postgres.
+    Canonical store is DynamoDB (falcon-trades, DW# namespace) + S3; this is the dashboard mirror."""
+    import re
+    if not re.fullmatch(r'\d{4}-\d{2}', month or ''):
+        return jsonify({"error": "month must be YYYY-MM"}), 400
+    try:
+        rows = db.execute(
+            "SELECT date, dow, discipline_result, adherence_pct, combined_r, realized_pnl, "
+            "plan, tickers, goal, learned, changes, overview, submitted_to_mic, "
+            "graduation_status, s3_artifact "
+            "FROM discipline_workshop WHERE month=%s ORDER BY date", (month,), fetch='all') or []
+        days, wins, losses = [], 0, 0
+        for r in rows:
+            res = r.get('discipline_result')
+            if res == 'WIN':
+                wins += 1
+            elif res == 'LOSS':
+                losses += 1
+            num = lambda k: float(r[k]) if r.get(k) is not None else None
+            days.append({
+                "date": str(r.get('date')), "dow": r.get('dow'), "discipline_result": res,
+                "adherence_pct": num('adherence_pct'), "combined_r": num('combined_r'),
+                "realized_pnl": num('realized_pnl'), "plan": r.get('plan'), "tickers": r.get('tickers'),
+                "goal": r.get('goal'), "learned": r.get('learned'), "changes": r.get('changes'),
+                "overview": r.get('overview'), "submitted_to_mic": r.get('submitted_to_mic'),
+                "graduation_status": r.get('graduation_status'), "s3_artifact": r.get('s3_artifact'),
+            })
+        graded = wins + losses
+        return jsonify({
+            "status": "success", "month": month, "days": days,
+            "tally": {"wins": wins, "losses": losses, "graded": graded,
+                      "adherence_rate": round(wins / graded, 3) if graded else None},
+            "graduation": {"method": "moderator-vote",
+                           "status": days[-1]["graduation_status"] if days else "in-progress"},
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route('/strategies')
