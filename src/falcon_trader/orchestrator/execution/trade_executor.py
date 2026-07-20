@@ -22,7 +22,7 @@ from falcon_core import DatabaseManager, get_db_manager
 from falcon_trader.orchestrator.utils.cents import to_cents, to_dollars, calc_cost, calc_pnl
 from falcon_trader.orchestrator.routers.strategy_router import StrategyRouter
 from falcon_trader.orchestrator.validators.entry_validator import EntryValidator
-from falcon_trader.orchestrator.engines import RSIEngine, MomentumEngine, BollingerEngine
+from falcon_trader.orchestrator.engines import RSIEngine, MomentumEngine, BollingerEngine, RosterStrategyEngine
 from falcon_trader.orchestrator.execution.market_data_fetcher import MarketDataFetcher
 
 
@@ -66,12 +66,202 @@ class TradeExecutor:
             'bollinger_mean_reversion': BollingerEngine(config, self.db)
         }
 
+        # Roster (paper_trading) strategies loaded from strategy_roster. These are
+        # falcon_core BaseStrategy plugins promoted through the backtest lifecycle,
+        # wrapped so they drive the same paper broker as the hardcoded engines.
+        # See falcon-core#8.
+        self.roster_engines = {}          # strategy_name -> RosterStrategyEngine
+        self.roster_symbols = {}          # strategy_name -> [symbols]
+        exec_config = config.get('execution', {})
+        self.use_roster_strategies = exec_config.get('use_roster_strategies', True)
+        if self.use_roster_strategies:
+            self.load_roster_strategies()
+
         # Get monitoring config
         self.monitoring_config = config.get('monitoring', {})
         self.check_interval = self.monitoring_config.get('check_interval_seconds', 60)
 
         print("[EXECUTOR] Trade Executor initialized")
         print(f"[EXECUTOR] Strategies: {list(self.engines.keys())}")
+        if self.roster_engines:
+            print(f"[EXECUTOR] Roster strategies (paper_trading): {list(self.roster_engines.keys())}")
+
+    def load_roster_strategies(self) -> None:
+        """Load status='paper_trading' strategies from strategy_roster.
+
+        Each row's strategy_code is validated + loaded into a BaseStrategy class
+        (via falcon_core), instantiated with its roster params, and wrapped in a
+        RosterStrategyEngine. The engine is registered under the strategy_name in
+        both self.roster_engines (for entry generation) and self.engines (so
+        monitor_positions can find it to run stop/target exits on its positions).
+        """
+        try:
+            from falcon_core.backtesting.strategy_loader import (
+                validate_strategy_code, load_strategy_from_code,
+            )
+        except Exception as e:
+            print(f"[EXECUTOR] Roster strategies unavailable (falcon_core import failed): {e}")
+            return
+
+        try:
+            rows = self.db.execute(
+                "SELECT strategy_name, symbols, interval, params, strategy_code "
+                "FROM strategy_roster WHERE status = %s AND strategy_code IS NOT NULL",
+                ('paper_trading',),
+                fetch='all'
+            )
+        except Exception as e:
+            print(f"[EXECUTOR] Could not query strategy_roster: {e}")
+            return
+
+        for row in (rows or []):
+            name = row['strategy_name']
+            code = row['strategy_code']
+            if not code or not code.strip():
+                continue
+
+            is_valid, err = validate_strategy_code(code)
+            if not is_valid:
+                print(f"[EXECUTOR] Roster strategy '{name}' failed validation: {err}")
+                continue
+
+            cls = load_strategy_from_code(code, name)
+            if cls is None:
+                print(f"[EXECUTOR] Roster strategy '{name}' could not be loaded")
+                continue
+
+            # Parse roster params (JSON/JSONB) and symbols.
+            params_raw = row.get('params') if isinstance(row, dict) else None
+            symbols = row.get('symbols') if isinstance(row, dict) else None
+            interval = (row.get('interval') if isinstance(row, dict) else None) or '5m'
+            params_dict = self._as_dict(params_raw)
+            symbols = self._as_list(symbols)
+
+            try:
+                # Start from the strategy's OWN default params (a subclass may add
+                # fields like orb_minutes), then overlay any roster-provided values
+                # onto fields that exist — never downcast to the base StrategyParams.
+                params = cls.default_params()
+                for pk, pv in (params_dict or {}).items():
+                    if hasattr(params, pk):
+                        setattr(params, pk, pv)
+                instance = cls(params)
+            except Exception as e:
+                print(f"[EXECUTOR] Roster strategy '{name}' init failed: {e}")
+                continue
+
+            engine = RosterStrategyEngine(self.config, self.db, instance, name, interval)
+            self.roster_engines[name] = engine
+            self.roster_symbols[name] = symbols
+            # Register so monitor_positions resolves positions tagged with this name.
+            self.engines[name] = engine
+
+    @staticmethod
+    def _as_dict(value) -> dict:
+        """Coerce a JSON/JSONB column value into a dict."""
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, str) and value.strip():
+            try:
+                parsed = json.loads(value)
+                return parsed if isinstance(parsed, dict) else {}
+            except (ValueError, TypeError):
+                return {}
+        return {}
+
+    @staticmethod
+    def _as_list(value) -> list:
+        """Coerce a JSON/JSONB column value into a list of symbols."""
+        if isinstance(value, list):
+            return value
+        if isinstance(value, str) and value.strip():
+            try:
+                parsed = json.loads(value)
+                return parsed if isinstance(parsed, list) else []
+            except (ValueError, TypeError):
+                return []
+        return []
+
+    def process_roster_strategies(self) -> Dict:
+        """Run each paper_trading roster strategy over its symbols for entries/exits.
+
+        For every (strategy, symbol) pair this fetches bars at the strategy's
+        interval, generates a signal via the wrapped BaseStrategy, and executes
+        BUY/SELL through the inherited paper broker. Risk-based exits (stop/target)
+        are still handled separately by monitor_positions.
+        """
+        summary = {
+            'strategies': len(self.roster_engines),
+            'symbols_processed': 0,
+            'trades_executed': 0,
+            'details': []
+        }
+        if not self.roster_engines:
+            return summary
+
+        # Global position cap shared with the rest of the executor.
+        max_positions = self.config.get('risk_management', {}).get('max_positions', 10)
+
+        print(f"\n[ROSTER] Running {len(self.roster_engines)} paper_trading strategies")
+        print("=" * 60)
+
+        for name, engine in self.roster_engines.items():
+            symbols = self.roster_symbols.get(name, [])
+            interval = engine.interval
+            for symbol in symbols:
+                summary['symbols_processed'] += 1
+                detail = {'strategy': name, 'symbol': symbol, 'action': 'NONE', 'reason': ''}
+                try:
+                    market_data = self.data_fetcher.fetch_market_data(
+                        symbol, lookback_days=5, interval=interval,
+                    )
+                    if not market_data or market_data.get('error'):
+                        detail['reason'] = f"data unavailable: {market_data.get('error', 'unknown')}"
+                        summary['details'].append(detail)
+                        continue
+
+                    is_valid, reason = self.data_fetcher.validate_data_quality(market_data, min_periods=20)
+                    if not is_valid:
+                        detail['reason'] = f"data quality: {reason}"
+                        summary['details'].append(detail)
+                        continue
+
+                    signal = engine.generate_signal(symbol, market_data)
+                    detail['action'] = signal.action
+                    detail['reason'] = signal.reason
+
+                    # Enforce the global position cap on new entries only.
+                    if signal.action == 'BUY':
+                        open_positions = self.db.execute(
+                            "SELECT COUNT(*) AS c FROM positions WHERE quantity > 0",
+                            fetch='one'
+                        )
+                        count = int(open_positions['c']) if open_positions else 0
+                        if count >= max_positions:
+                            detail['action'] = 'SKIP'
+                            detail['reason'] = f"position cap reached ({count}/{max_positions})"
+                            summary['details'].append(detail)
+                            continue
+
+                    if signal.action in ('BUY', 'SELL'):
+                        print(f"[ROSTER] {name}/{symbol}: {signal.action} — {signal.reason}")
+                        result = engine.execute_signal(signal)
+                        if result.success:
+                            summary['trades_executed'] += 1
+                            detail['executed'] = True
+                        else:
+                            detail['executed'] = False
+                            detail['reason'] = result.error or signal.reason
+                    summary['details'].append(detail)
+
+                except Exception as e:
+                    detail['reason'] = f"error: {e}"
+                    summary['details'].append(detail)
+                    continue
+
+        print(f"[ROSTER] Symbols processed: {summary['symbols_processed']}, "
+              f"trades executed: {summary['trades_executed']}")
+        return summary
 
     def process_stock(self, symbol: str, ai_recommendation: Optional[Dict] = None) -> Dict:
         """
