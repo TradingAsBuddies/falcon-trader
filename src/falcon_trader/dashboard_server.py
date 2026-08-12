@@ -1224,9 +1224,9 @@ def activate_youtube_strategy(youtube_strategy_id):
             return jsonify({"error": "YouTube strategy not found"}), 404
 
         # Get Claude API key
-        claude_key = os.getenv('CLAUDE_API_KEY')
+        claude_key = os.getenv('CLAUDE_API_KEY') or os.getenv('ANTHROPIC_API_KEY')
         if not claude_key:
-            return jsonify({"error": "CLAUDE_API_KEY not set"}), 503
+            return jsonify({"error": "CLAUDE_API_KEY / ANTHROPIC_API_KEY not set"}), 503
 
         # Generate code from YouTube strategy
         generator = StrategyCodeGenerator(claude_key)
@@ -2412,8 +2412,8 @@ def main():
     # are read at request time in /api/risk-analysis; if both are absent the
     # structured flags still render and the narrative uses the library fallback.
     # Get API keys from environment variables (preferred) or command line
-    MASSIVE_API_KEY = os.getenv('MASSIVE_API_KEY', '')
-    CLAUDE_API_KEY = os.getenv('CLAUDE_API_KEY', '')
+    MASSIVE_API_KEY = os.getenv('MASSIVE_API_KEY') or os.getenv('POLYGON_API_KEY', '')
+    CLAUDE_API_KEY = os.getenv('CLAUDE_API_KEY') or os.getenv('ANTHROPIC_API_KEY', '')
 
     # Command line overrides (for backwards compatibility)
     if len(sys.argv) > 1:
