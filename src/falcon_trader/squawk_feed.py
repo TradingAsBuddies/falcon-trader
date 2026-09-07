@@ -20,8 +20,8 @@ HARD CONSTRAINTS honored:
     never touches bars/quotes or flat files.
   * PRIVATE: this is a dashboard-internal surface. NOTHING here writes to Slack /
     Notion / any public channel. Massive/Polygon news must never be republished.
-  * API key read via os.getenv('POLYGON_API_KEY') with MASSIVE_API_KEY fallback —
-    NEVER hardcoded.
+  * API key read via os.getenv('MASSIVE_API_KEY') with legacy POLYGON_API_KEY
+    fallback — NEVER hardcoded.
   * Carver/Bellafiore lens: a SHORT ranked de-duped stream beats a firehose.
     We gate to the in-play universe, classify + drop NOISE/sponsored PR, dedup by
     Polygon id AND a (ticker+event-type+time-bucket) fingerprint, rank by an
@@ -323,7 +323,8 @@ def _fingerprint(ticker: str, catalyst_type: str,
 # ---------------------------------------------------------------------------
 
 def _api_key() -> Optional[str]:
-    return os.getenv("POLYGON_API_KEY") or os.getenv("MASSIVE_API_KEY")
+    # Massive is the vendor's current name; POLYGON_API_KEY kept as legacy alias
+    return os.getenv("MASSIVE_API_KEY") or os.getenv("POLYGON_API_KEY")
 
 
 def _fetch_ticker_news(ticker: str, gte_iso: str, api_key: str,
@@ -369,7 +370,7 @@ def fetch_squawk(universe: Optional[List[str]] = None,
           "items": [row, ...],          # <= HARD_CAP, reverse-chronological-ish
           "universe": [tickers...],
           "fetched_at": ISO8601 Z,
-          "data_recency": "LIVE (Polygon news, publisher-time)",
+          "data_recency": "LIVE (Massive news, publisher-time)",
           "source": "polygon_news",
           "message": optional str,
         }
@@ -395,9 +396,9 @@ def fetch_squawk(universe: Optional[List[str]] = None,
             "items": [],
             "universe": universe,
             "fetched_at": now.isoformat().replace("+00:00", "Z"),
-            "data_recency": "UNAVAILABLE (POLYGON_API_KEY not set)",
+            "data_recency": "UNAVAILABLE (MASSIVE_API_KEY not set)",
             "source": "polygon_news",
-            "message": "No Polygon API key (POLYGON_API_KEY / MASSIVE_API_KEY).",
+            "message": "No Massive API key (MASSIVE_API_KEY / legacy POLYGON_API_KEY).",
         }
 
     if not universe:
@@ -406,7 +407,7 @@ def fetch_squawk(universe: Optional[List[str]] = None,
             "items": [],
             "universe": [],
             "fetched_at": now.isoformat().replace("+00:00", "Z"),
-            "data_recency": "LIVE (Polygon news, publisher-time)",
+            "data_recency": "LIVE (Massive news, publisher-time)",
             "source": "polygon_news",
             "message": "No in-play universe resolved.",
         }
@@ -555,7 +556,7 @@ def fetch_squawk(universe: Optional[List[str]] = None,
         "items": rows,
         "universe": universe,
         "fetched_at": now.isoformat().replace("+00:00", "Z"),
-        "data_recency": "LIVE (Polygon news, publisher-time)",
+        "data_recency": "LIVE (Massive news, publisher-time)",
         "source": "polygon_news",
         "lookback_min": lookback_min,
         "count": len(rows),
