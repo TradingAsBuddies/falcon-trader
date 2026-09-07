@@ -89,6 +89,11 @@ execution:
   retry_attempts: 3
   retry_delay_seconds: 5
   timeout_seconds: 30
+  # Run strategies promoted to status='paper_trading' in strategy_roster over
+  # their declared symbols each cycle, alongside the hardcoded engines. This is
+  # what makes promoting a strategy actually trade (falcon-core#8). Set false to
+  # revert to hardcoded-engine-only behavior.
+  use_roster_strategies: true
 
 # Monitoring
 monitoring:

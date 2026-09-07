@@ -92,6 +92,24 @@ def process_screener_results(executor, tracker, screener_file='screened_stocks.j
     return summary
 
 
+def process_roster_strategies(executor, tracker):
+    """Run promoted (paper_trading) roster strategies over their symbols"""
+
+    if not getattr(executor, 'roster_engines', None):
+        return None
+
+    print_section("PROCESSING ROSTER STRATEGIES")
+
+    summary = executor.process_roster_strategies()
+
+    print(f"\n[RESULTS]")
+    print(f"  Roster Strategies: {summary['strategies']}")
+    print(f"  Symbols Processed: {summary['symbols_processed']}")
+    print(f"  Trades Executed: {summary['trades_executed']}")
+
+    return summary
+
+
 def monitor_positions(executor, tracker):
     """Monitor open positions for exit signals"""
 
@@ -217,6 +235,8 @@ def main():
         if command == '--process':
             # Process screener results
             process_screener_results(executor, tracker)
+            # Run promoted roster strategies
+            process_roster_strategies(executor, tracker)
 
         elif command == '--monitor':
             # Monitor positions
@@ -234,6 +254,7 @@ def main():
         elif command == '--once':
             # Full cycle once
             process_screener_results(executor, tracker)
+            process_roster_strategies(executor, tracker)
             monitor_positions(executor, tracker)
             show_account_status(executor)
             show_performance_summary(tracker, days=1)
@@ -264,6 +285,9 @@ def main():
 
                 # Process screener results
                 process_screener_results(executor, tracker)
+
+                # Run promoted roster strategies
+                process_roster_strategies(executor, tracker)
 
                 # Monitor positions
                 monitor_positions(executor, tracker)

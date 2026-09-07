@@ -162,6 +162,11 @@ class MarketDataFetcher:
                     prices = [r['c'] for r in results]
                     volumes = [r['v'] for r in results]
                     timestamps = [r['t'] for r in results]  # epoch ms
+                    # Full OHLC (consumed by roster BaseStrategy adapter; close-only
+                    # consumers keep using 'prices'/'price').
+                    opens = [r.get('o', r['c']) for r in results]
+                    highs = [r.get('h', r['c']) for r in results]
+                    lows = [r.get('l', r['c']) for r in results]
 
                     current_price = prices[-1] if prices else 0.0
                     current_volume = volumes[-1] if volumes else 0
@@ -169,6 +174,9 @@ class MarketDataFetcher:
                     return {
                         'price': current_price,
                         'prices': prices,
+                        'opens': opens,
+                        'highs': highs,
+                        'lows': lows,
                         'volume': current_volume,
                         'volumes': volumes,
                         'timestamps': timestamps,
@@ -230,10 +238,17 @@ class MarketDataFetcher:
 
                 prices = df['close'].tolist()
                 volumes = df['volume'].tolist()
+                # Full OHLC where the flat file provides it, else fall back to close.
+                opens = df['open'].tolist() if 'open' in df.columns else list(prices)
+                highs = df['high'].tolist() if 'high' in df.columns else list(prices)
+                lows = df['low'].tolist() if 'low' in df.columns else list(prices)
 
                 return {
                     'price': prices[-1] if prices else 0.0,
                     'prices': prices,
+                    'opens': opens,
+                    'highs': highs,
+                    'lows': lows,
                     'volume': volumes[-1] if volumes else 0,
                     'volumes': volumes,
                     'timestamps': [],
@@ -287,13 +302,21 @@ class MarketDataFetcher:
             if not hist_df.empty:
                 prices = hist_df['Close'].tolist()
                 volumes = hist_df['Volume'].tolist()
+                opens = hist_df['Open'].tolist() if 'Open' in hist_df.columns else list(prices)
+                highs = hist_df['High'].tolist() if 'High' in hist_df.columns else list(prices)
+                lows = hist_df['Low'].tolist() if 'Low' in hist_df.columns else list(prices)
+                # Bar timestamps (index) so the strategy adapter can build a DatetimeIndex.
+                timestamps = [int(ts.timestamp() * 1000) for ts in hist_df.index]
 
                 return {
                     'price': prices[-1] if prices else 0.0,
                     'prices': prices,
+                    'opens': opens,
+                    'highs': highs,
+                    'lows': lows,
                     'volume': volumes[-1] if volumes else 0,
                     'volumes': volumes,
-                    'timestamps': [],
+                    'timestamps': timestamps,
                     'source': 'yfinance',
                     'interval': interval,
                 }
