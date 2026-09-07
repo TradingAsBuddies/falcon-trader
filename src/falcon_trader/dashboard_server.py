@@ -37,6 +37,14 @@ except ImportError:
     create_api_routes = None
     BACKTEST_RESULTS_AVAILABLE = False
 
+# Import backtest EXECUTION API — headless remote backtest submission (falcon-strategies#5)
+try:
+    from falcon_core.backtesting.exec_api import create_backtest_exec_routes
+    BACKTEST_EXEC_AVAILABLE = True
+except ImportError:
+    create_backtest_exec_routes = None
+    BACKTEST_EXEC_AVAILABLE = False
+
 # DAS Trader CMD-API execution backend (SIM only, dry-run default)
 try:
     from falcon_trader.das_execution import DASExecutionClient, health_check as das_health_check
@@ -110,6 +118,13 @@ if BACKTEST_RESULTS_AVAILABLE:
         backtest_results_store = BacktestResultsStore(db_manager=db)
         create_api_routes(app, backtest_results_store)
         print("Backtest analytics API routes registered (using main database)")
+        # Execution routes (POST /api/backtest, GET /api/backtest/<id>) — headless remote runs.
+        if BACKTEST_EXEC_AVAILABLE:
+            try:
+                create_backtest_exec_routes(app, backtest_results_store)
+                print("Backtest execution API routes registered (POST /api/backtest)")
+            except Exception as e:
+                print(f"Warning: Could not register backtest execution routes: {e}")
     except Exception as e:
         print(f"Warning: Could not initialize backtest results store: {e}")
 
