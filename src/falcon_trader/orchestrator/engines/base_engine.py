@@ -14,6 +14,8 @@ from typing import Optional, Dict, List
 from dataclasses import dataclass
 
 from falcon_core import DatabaseManager
+from falcon_trader.symbol_state import load_symbol_state
+from falcon_trader.trading_guards import CooldownPolicy, check_cooldown
 from falcon_trader.orchestrator.utils.data_structures import Position
 
 
@@ -78,6 +80,10 @@ class BaseStrategyEngine:
         # Get routing config
         self.routing_config = config.get('routing', {})
         self.min_stop_buffer = self.routing_config.get('min_stop_loss_buffer', 0.05)
+
+        # Per-symbol churn limits, driven from the orchestrator config
+        # (falcon-trader#24). Thresholds live in config, not in the code.
+        self.cooldown_policy = CooldownPolicy.from_config(config.get('cooldown'))
 
     def get_position(self, symbol: str) -> Optional[Position]:
         """
@@ -169,6 +175,27 @@ class BaseStrategyEngine:
             ExecutionResult with trade details
         """
         try:
+            # Churn gate (falcon-trader#24). The only prior check was for a
+            # *simultaneous* duplicate position below -- once a position closed,
+            # the symbol was re-eligible on the very next cycle, which is how
+            # CDXS and PCVX were re-bought at a higher price hours after being
+            # sold at a loss.
+            state = load_symbol_state(self.db, symbol)
+            cooldown = check_cooldown(
+                symbol,
+                self.cooldown_policy,
+                last_exit_at=state.last_exit_at,
+                loss_streak=state.loss_streak,
+                round_trips_today=state.round_trips_today,
+            )
+            if not cooldown.allowed:
+                print(f"  [BLOCKED] {symbol}: {cooldown.message}")
+                return ExecutionResult(
+                    success=False,
+                    symbol=symbol,
+                    error=f"{cooldown.reason}: {cooldown.message}",
+                )
+
             # Check if we already have a position
             existing = self.get_position(symbol)
             if existing:
