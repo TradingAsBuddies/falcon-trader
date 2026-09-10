@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional, List, Dict
 
+from falcon_trader.orchestrator.utils.cents import to_cents, to_dollars, calc_pnl
+
 
 @dataclass
 class StockProfile:
@@ -73,10 +75,11 @@ class Position:
     unrealized_pnl_pct: float = 0.0
 
     def update_current_price(self, price: float):
-        """Update current price and recalculate P&L"""
+        """Update current price and recalculate P&L (cents arithmetic)"""
         self.current_price = price
-        self.unrealized_pnl = (price - self.entry_price) * self.quantity
-        self.unrealized_pnl_pct = (price - self.entry_price) / self.entry_price
+        self.unrealized_pnl = calc_pnl(price, self.entry_price, self.quantity)
+        entry_cents = to_cents(self.entry_price)
+        self.unrealized_pnl_pct = (to_cents(price) - entry_cents) / entry_cents if entry_cents else 0.0
 
     def to_dict(self) -> dict:
         """Convert to dictionary"""
