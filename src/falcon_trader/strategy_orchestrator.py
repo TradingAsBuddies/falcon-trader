@@ -10,6 +10,7 @@ import time
 import signal
 from datetime import datetime
 from paper_trading_bot import PaperTradingBot
+from falcon_trader.orchestrator.utils.cents import to_cents, to_dollars
 from strategy_executor import StrategyExecutor
 from strategy_optimizer import StrategyOptimizer
 from falcon_trader.strategy_analytics import StrategyAnalytics
@@ -183,8 +184,9 @@ class StrategyOrchestrator:
                 print(f"\nFinal Account Value: ${account['total_value']:,.2f}")
                 print(f"Cash: ${account['cash']:,.2f}")
                 print(f"Initial Balance: ${self.initial_balance:,.2f}")
-                pnl = account['total_value'] - self.initial_balance
-                pnl_pct = (pnl / self.initial_balance) * 100
+                pnl_cents = to_cents(account['total_value']) - to_cents(self.initial_balance)
+                pnl = to_dollars(pnl_cents)
+                pnl_pct = (pnl_cents / to_cents(self.initial_balance)) * 100 if self.initial_balance else 0.0
                 print(f"P&L: ${pnl:,.2f} ({pnl_pct:+.2f}%)")
             except Exception as e:
                 print(f"[ORCHESTRATOR] Could not retrieve final stats: {e}")
@@ -207,11 +209,13 @@ class StrategyOrchestrator:
 
         if self.bot and self.running:
             account = self.bot.get_account()
+            pnl_cents = to_cents(account['total_value']) - to_cents(self.initial_balance)
+            init_cents = to_cents(self.initial_balance)
             status["account"] = {
                 "total_value": account['total_value'],
                 "cash": account['cash'],
-                "pnl": account['total_value'] - self.initial_balance,
-                "pnl_pct": ((account['total_value'] - self.initial_balance) / self.initial_balance) * 100
+                "pnl": to_dollars(pnl_cents),
+                "pnl_pct": (pnl_cents / init_cents) * 100 if init_cents else 0.0
             }
 
         if self.executor and self.running:
