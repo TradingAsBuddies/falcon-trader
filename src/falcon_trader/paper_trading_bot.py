@@ -12,6 +12,8 @@ from datetime import datetime
 from typing import List, Dict, Optional
 from falcon_core import DatabaseManager, FalconConfig
 
+from falcon_trader import portfolio, trading_guards
+
 try:
     falcon_config = FalconConfig()
 except Exception:
@@ -144,7 +146,11 @@ class PaperTradingBot:
 
             if response.status_code == 200:
                 data = response.json()
-                if data.get('status') == 'OK' and data.get('results'):
+                # A DELAYED-tier key returns status='DELAYED' with perfectly
+                # good results. Gating on 'OK' alone made get_quote return None
+                # for every symbol on this key (falcon-trader#23; falcon-core
+                # fixed the same bug in c491253 and it was never ported here).
+                if data.get('status') in ('OK', 'DELAYED') and data.get('results'):
                     result = data['results'][0]
                     return {
                         'symbol': symbol,
@@ -178,10 +184,43 @@ class PaperTradingBot:
             Dict with order result
         """
         try:
+            # Market-hours gate (falcon-trader#23). Last line of defence: the
+            # loops are gated too, but /api/order reaches here directly.
+            # FALCON_ALLOW_EXTENDED_HOURS=1 is the deliberate override.
+            if os.getenv('FALCON_ALLOW_EXTENDED_HOURS') != '1':
+                session = trading_guards.check_market_open()
+                if not session.allowed:
+                    print(f"[BOT] Rejected {side} {quantity} {symbol}: {session.message}")
+                    return {
+                        'status': 'error',
+                        'reason': session.reason,
+                        'message': session.message,
+                    }
+
             # Get current market price
             quote = self.get_quote(symbol)
             if not quote:
                 return {'status': 'error', 'message': f'Could not get quote for {symbol}'}
+
+            # Refuse to fill off a stale bar. get_quote uses the /prev endpoint
+            # -- the previous session's close -- so without this an order at any
+            # wall-clock time "fills" at yesterday's price, which is precisely
+            # how the 16:50 orders succeeded (falcon-trader#23).
+            bar_ts = quote.get('timestamp')
+            if bar_ts and os.getenv('FALCON_ALLOW_STALE_FILLS') != '1':
+                bar_dt = datetime.fromtimestamp(
+                    bar_ts / 1000 if bar_ts > 1e11 else bar_ts,
+                    tz=trading_guards.EASTERN,
+                )
+                fresh = trading_guards.check_fill_price_freshness(bar_dt)
+                if not fresh.allowed:
+                    print(f"[BOT] Rejected {side} {quantity} {symbol}: {fresh.message}")
+                    return {
+                        'status': 'error',
+                        'reason': fresh.reason,
+                        'message': fresh.message,
+                        'barTimestamp': bar_dt.isoformat(),
+                    }
 
             execution_price = price if order_type == 'limit' and price else quote['price']
             total_cost = execution_price * quantity
@@ -195,14 +234,46 @@ class PaperTradingBot:
                         'message': f'Insufficient funds. Need ${total_cost:,.2f}, have ${account["cash"]:,.2f}'
                     }
 
+            # Validate the sell BEFORE touching anything.
+            #
+            # This used to happen the other way round: cash was credited for
+            # every sell unconditionally, while _update_position silently did
+            # nothing when there was no position and deleted the row (still
+            # crediting the full notional) when the quantity exceeded holdings.
+            # Both minted cash from nothing (falcon-trader#22).
+            if side == 'sell':
+                held = self.db.execute(
+                    "SELECT quantity FROM positions WHERE symbol = %s",
+                    (symbol,),
+                    fetch='one',
+                )
+                check = portfolio.validate_sell(
+                    held['quantity'] if held else 0, quantity,
+                )
+                if not check.ok:
+                    print(f"[BOT] Rejected sell {quantity} {symbol}: {check.message}")
+                    return {
+                        'status': 'error',
+                        'reason': check.reason,
+                        'message': check.message,
+                    }
+
             # Execute trade
             timestamp = datetime.now().isoformat()
             pnl = 0.0
 
             # Update positions and calculate P&L for sells
             if side == 'buy':
+                if not self._update_account_cash(-total_cost):
+                    return {
+                        'status': 'error',
+                        'reason': 'insufficient_funds',
+                        'message': (
+                            f'Insufficient funds for {quantity} {symbol} '
+                            f'at ${execution_price:,.4f}'
+                        ),
+                    }
                 self._update_position(symbol, quantity, execution_price, 'buy')
-                self._update_account_cash(-total_cost)
             else:  # sell
                 pnl = self._update_position(symbol, quantity, execution_price, 'sell')
                 self._update_account_cash(total_cost)
@@ -283,15 +354,43 @@ class PaperTradingBot:
 
         return pnl
 
-    def _update_account_cash(self, amount: float):
-        """Update account cash balance"""
-        account = self.get_account()
-        new_cash = account['cash'] + amount
+    def _update_account_cash(self, amount: float) -> bool:
+        """Apply a cash delta atomically. Returns False if a debit was refused.
+
+        This was a read-modify-write -- SELECT the cash, add, then
+        ``UPDATE account SET cash = %s`` with **no WHERE clause** -- and three
+        different code paths did it concurrently (this bot, the Flask thread,
+        and the orchestrator engines). Interleaved debits were simply lost
+        (falcon-trader#22).
+
+        Now the arithmetic happens in the database, and a debit carries its own
+        sufficient-funds condition, so an overdraft loses the race instead of
+        going negative.
+        """
+        timestamp = datetime.now().isoformat()
+
+        if amount < 0:
+            required = -amount
+            rows = self.db.execute(
+                """UPDATE account
+                      SET cash = cash - %s, last_updated = %s
+                    WHERE id = (SELECT id FROM account ORDER BY id LIMIT 1)
+                      AND cash >= %s""",
+                (required, timestamp, required),
+            )
+            # Row count semantics vary by driver; re-read to confirm.
+            if rows in (0,):
+                print(f"[BOT] Cash debit of ${required:,.2f} refused (insufficient funds)")
+                return False
+            return True
 
         self.db.execute(
-            "UPDATE account SET cash = %s, last_updated = %s",
-            (new_cash, datetime.now().isoformat())
+            """UPDATE account
+                  SET cash = cash + %s, last_updated = %s
+                WHERE id = (SELECT id FROM account ORDER BY id LIMIT 1)""",
+            (amount, timestamp),
         )
+        return True
 
     def update_market_data(self):
         """Fetch latest market data for tracked symbols"""
@@ -411,16 +510,62 @@ class PaperTradingBot:
         """Get cached market data"""
         return self.market_data.copy()
 
-    def get_current_prices(self) -> Dict[str, float]:
-        """Get current prices for tracked symbols"""
+    def get_current_prices(self, symbols=None) -> Dict[str, float]:
+        """Get current prices.
+
+        `symbols` defaults to the static watchlist, but callers that need to
+        mark a book must pass the symbols actually held. Iterating only
+        ``self.symbols`` is why every open position outside the three-symbol
+        FALCON_DASHBOARD_SYMBOLS list reported currentPrice == avgPrice
+        (falcon-trader#21).
+
+        A symbol with no obtainable quote is **absent** from the returned map --
+        not present with a fallback value. Callers use that absence to mark the
+        position stale.
+        """
+        wanted = list(self.symbols if symbols is None else symbols)
         prices = {}
-        for symbol in self.symbols:
+        for symbol in wanted:
             if symbol in self.market_data:
                 prices[symbol] = self.market_data[symbol]['price']
-            else:
-                quote = self.get_quote(symbol)
-                if quote:
-                    prices[symbol] = quote['price']
+                continue
+            quote = self.get_quote(symbol)
+            if quote and quote.get('price'):
+                prices[symbol] = quote['price']
+        return prices
+
+    def get_position_symbols(self):
+        """Symbols with an open position."""
+        rows = self.db.execute(
+            "SELECT symbol FROM positions WHERE quantity > 0", fetch='all',
+        ) or []
+        return [r['symbol'] for r in rows]
+
+    def mark_positions(self):
+        """Refresh positions.current_price for every open position.
+
+        One path owns this column. It was written by
+        orchestrator/execution/trade_executor but never read by /api/positions,
+        while the dashboard computed its own marks from a different source that
+        fell back to cost (falcon-trader#21).
+        """
+        symbols = self.get_position_symbols()
+        if not symbols:
+            return {}
+
+        prices = self.get_current_prices(symbols)
+        timestamp = datetime.now().isoformat()
+        for symbol, price in prices.items():
+            self.db.execute(
+                """UPDATE positions
+                      SET current_price = %s, last_updated = %s
+                    WHERE symbol = %s""",
+                (price, timestamp, symbol),
+            )
+
+        missing = [s for s in symbols if s not in prices]
+        if missing:
+            print(f"[BOT] No quote for {len(missing)} held symbol(s): {missing}")
         return prices
 
 
@@ -428,14 +573,21 @@ class PaperTradingBot:
 if __name__ == '__main__':
     import sys
 
-    # Get API key from environment or command line
-    api_key = os.getenv('MASSIVE_API_KEY', '')
-    if len(sys.argv) > 1:
-        api_key = sys.argv[1]
+    # Environment only. A key passed on the command line is visible in `ps` to
+    # every user on the host (falcon-trader#25).
+    api_key = os.getenv('MASSIVE_API_KEY', '') or os.getenv('POLYGON_API_KEY', '')
+
+    if len(sys.argv) > 1 and not sys.argv[1].startswith('-'):
+        print(
+            "Error: the API key is no longer accepted as a command-line "
+            "argument -- it is visible in `ps` to every user on the host.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
 
     if not api_key or api_key == 'your_polygon_api_key_here':
         print("Error: MASSIVE_API_KEY not set")
-        print("Usage: python3 paper_trading_bot.py <polygon_api_key>")
+        print("Usage: MASSIVE_API_KEY=... python3 paper_trading_bot.py")
         sys.exit(1)
 
     # Initialize bot

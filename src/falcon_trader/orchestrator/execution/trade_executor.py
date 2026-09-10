@@ -17,9 +17,11 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 from falcon_core import DatabaseManager
+from falcon_trader import trading_guards
 from falcon_trader.orchestrator.routers.strategy_router import StrategyRouter
 from falcon_trader.orchestrator.validators.entry_validator import EntryValidator
 from falcon_trader.orchestrator.engines import RSIEngine, MomentumEngine, BollingerEngine
+from falcon_trader.orchestrator.engines.base_engine import TradeSignal
 from falcon_trader.orchestrator.execution.market_data_fetcher import MarketDataFetcher
 
 
@@ -324,6 +326,95 @@ class TradeExecutor:
 
         return actions
 
+    def flatten_positions(self, reason: str = 'eod') -> List[Dict]:
+        """Close every open position deliberately (falcon-trader#23).
+
+        There was no EOD flatten anywhere in the repo. Positions simply carried,
+        and the 16:50 SELL burst in the live book was the 5-minute monitor cycle
+        happening to land after the close -- an accident, not an exit policy.
+
+        Every resulting trade row carries `reason`, so an end-of-day exit is
+        distinguishable from a stop-loss or a signal exit after the fact.
+        """
+        actions = []
+
+        try:
+            positions_data = self.db.execute(
+                "SELECT * FROM positions WHERE quantity > 0", fetch='all',
+            ) or []
+        except Exception as e:
+            print(f"[ERROR] flatten_positions could not read positions: {e}")
+            return actions
+
+        if not positions_data:
+            print("[EOD] No open positions to flatten")
+            return actions
+
+        print(f"[EOD] Flattening {len(positions_data)} position(s), reason={reason}")
+
+        for pos_data in positions_data:
+            symbol = pos_data['symbol']
+            try:
+                market_data = self.data_fetcher.fetch_market_data(
+                    symbol, lookback_days=5,
+                )
+                current_price = (
+                    market_data.get('price')
+                    if market_data and not market_data.get('error') else None
+                )
+                if not current_price:
+                    # Refuse to invent a price. An unflattened position that is
+                    # reported is safer than one closed at a made-up mark.
+                    print(f"  [SKIP] {symbol}: no current price; left open")
+                    actions.append({
+                        'symbol': symbol, 'action': 'SKIP',
+                        'reason': 'no_price', 'flatten_reason': reason,
+                    })
+                    continue
+
+                strategy = pos_data.get('strategy') or ''
+                engine_key = {
+                    'rsi': 'rsi_mean_reversion',
+                    'momentum': 'momentum_breakout',
+                    'bollinger': 'bollinger_mean_reversion',
+                }.get(strategy, strategy)
+
+                engine = self.engines.get(engine_key) or next(
+                    iter(self.engines.values()), None,
+                )
+                if engine is None:
+                    print(f"  [SKIP] {symbol}: no engine available")
+                    continue
+
+                signal = TradeSignal(
+                    symbol=symbol,
+                    action='SELL',
+                    quantity=int(pos_data['quantity']),
+                    price=current_price,
+                    reason=reason,
+                )
+                result = engine.execute_signal(signal)
+
+                if result.success:
+                    print(f"  [FLAT] {symbol}: {pos_data['quantity']} @ ${current_price:.4f}")
+                    actions.append({
+                        'symbol': symbol, 'action': 'SELL',
+                        'price': result.price, 'reason': reason,
+                        'quantity': int(pos_data['quantity']),
+                    })
+                else:
+                    print(f"  [ERROR] {symbol}: flatten failed: {result.error}")
+                    actions.append({
+                        'symbol': symbol, 'action': 'ERROR',
+                        'reason': result.error, 'flatten_reason': reason,
+                    })
+
+            except Exception as e:
+                print(f"[ERROR] Error flattening {symbol}: {e}")
+                continue
+
+        return actions
+
     def process_ai_screener(self, screener_file: str = 'screened_stocks.json') -> Dict:
         """
         Process stocks from AI screener file
@@ -477,8 +568,28 @@ class TradeExecutor:
         print(f"\n[EXECUTOR] Starting monitoring loop (interval: {interval}s)")
         print("[EXECUTOR] Press Ctrl+C to stop")
 
+        last_block = None
+        flattened_for = None
         try:
             while self.running:
+                # Market-hours gate (falcon-trader#23). This loop ran 24/7/365.
+                session = trading_guards.check_market_open()
+                if not session.allowed:
+                    if last_block != session.reason:
+                        print(f"[EXECUTOR] Idle: {session.message}")
+                        last_block = session.reason
+                    time.sleep(interval)
+                    continue
+                last_block = None
+
+                today = datetime.now().date()
+                if trading_guards.should_flatten():
+                    if flattened_for != today:
+                        self.flatten_positions(reason='eod')
+                        flattened_for = today
+                    time.sleep(interval)
+                    continue
+
                 # Monitor positions
                 actions = self.monitor_positions()
 

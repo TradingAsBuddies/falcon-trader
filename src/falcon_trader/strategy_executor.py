@@ -6,6 +6,8 @@ Runs multiple trading strategies in parallel with real-time market data
 
 import json
 import time
+
+from falcon_trader import trading_guards
 import threading
 import pandas as pd
 from datetime import datetime, timedelta
@@ -197,6 +199,9 @@ class StrategyExecutor:
         self.update_interval = update_interval
         self.running = False
         self.thread = None
+        #: Set while the loop is idling outside RTH, so the reason is printed
+        #: once per transition rather than every update_interval seconds.
+        self._last_session_block = None
 
         print(f"[EXECUTOR] Initialized with update interval: {update_interval}s")
 
@@ -272,6 +277,19 @@ class StrategyExecutor:
 
         while self.running:
             try:
+                # Market-hours gate. This loop ran 24/7/365 -- the only time
+                # filter in the repo lived inside one strategy and was not on
+                # this path, which is how a BUY and five SELLs were "filled" at
+                # 16:50 (falcon-trader#23).
+                session = trading_guards.check_market_open()
+                if not session.allowed:
+                    if self._last_session_block != session.reason:
+                        print(f"[EXECUTOR] Idle: {session.message}")
+                        self._last_session_block = session.reason
+                    time.sleep(self.update_interval)
+                    continue
+                self._last_session_block = None
+
                 # Reload strategies in case new ones were added
                 self.load_active_strategies()
 
