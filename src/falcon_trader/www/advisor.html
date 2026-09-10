@@ -71,6 +71,14 @@
 
         .empty-state { text-align: center; padding: 60px 20px; color: #6b7280; }
         .empty-state h3 { font-size: 18px; margin-bottom: 8px; color: #9ca3af; }
+
+        .toast { position: fixed; top: 20px; right: 20px; padding: 14px 20px; border-radius: 8px; color: #fff; font-size: 14px; z-index: 2000; transition: opacity 0.3s; max-width: 400px; }
+        .toast-info { background: #1e3a5f; border: 1px solid #3b82f6; }
+        .toast-success { background: #065f46; border: 1px solid #34d399; }
+        .toast-error { background: #991b1b; border: 1px solid #f87171; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid #60a5fa; border-top-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: middle; margin-right: 6px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
@@ -264,31 +272,56 @@
 
         async function approveProposal(id) {
             if (!confirm('Approve this proposal? The strategy code will be updated.')) return;
-            const res = await fetch(`/api/advisor/proposals/${id}/approve`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}' });
-            const data = await res.json();
-            if (data.error) { alert(data.error); return; }
-            alert('Proposal approved!');
-            closeModal();
-            loadProposals();
+            try {
+                const res = await fetch(`/api/advisor/proposals/${id}/approve`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}' });
+                const data = await res.json();
+                if (data.error) { showToast(data.error, 'error'); return; }
+                showToast('Proposal #' + id + ' approved!', 'success');
+                closeModal();
+                loadProposals();
+            } catch (e) {
+                showToast('Error: ' + e.message, 'error');
+            }
         }
 
         async function rejectProposal(id) {
             const notes = prompt('Rejection reason (optional):') || '';
-            const res = await fetch(`/api/advisor/proposals/${id}/reject`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({review_notes: notes}) });
-            const data = await res.json();
-            if (data.error) { alert(data.error); return; }
-            alert('Proposal rejected.');
-            closeModal();
-            loadProposals();
+            try {
+                const res = await fetch(`/api/advisor/proposals/${id}/reject`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({review_notes: notes}) });
+                const data = await res.json();
+                if (data.error) { showToast(data.error, 'error'); return; }
+                showToast('Proposal #' + id + ' rejected.', 'info');
+                closeModal();
+                loadProposals();
+            } catch (e) {
+                showToast('Error: ' + e.message, 'error');
+            }
         }
 
         async function backtestProposal(id) {
-            alert('Backtest started. This may take a few minutes...');
-            const res = await fetch(`/api/advisor/proposals/${id}/backtest`, { method: 'POST' });
-            const data = await res.json();
-            if (data.error) { alert('Backtest error: ' + data.error); return; }
-            alert('Backtest complete! Refresh to see results.');
-            viewProposal(id);
+            // Disable the button that was clicked to prevent double-clicks
+            const btns = document.querySelectorAll('.btn-backtest');
+            btns.forEach(b => { b.disabled = true; b.innerHTML = '<span class="spinner"></span>Running...'; });
+
+            showToast('Backtest started for proposal #' + id + '. This may take a few minutes...', 'info', 0);
+            try {
+                const res = await fetch(`/api/advisor/proposals/${id}/backtest`, { method: 'POST' });
+                const data = await res.json();
+                clearToasts();
+                if (data.error) {
+                    showToast('Backtest error: ' + data.error, 'error');
+                } else {
+                    showToast('Backtest complete for proposal #' + id + '!', 'success');
+                    viewProposal(id);
+                }
+            } catch (e) {
+                clearToasts();
+                showToast('Network error: ' + e.message, 'error');
+            } finally {
+                // Re-enable buttons
+                btns.forEach(b => { b.disabled = false; b.textContent = 'Backtest'; });
+                loadProposals();
+            }
         }
 
         function closeModal() {
@@ -365,6 +398,20 @@
                 document.getElementById('usage-table').innerHTML =
                     `<div class="empty-state"><h3>Error</h3><p>${e.message}</p></div>`;
             }
+        }
+
+        // Toast notifications
+        function showToast(msg, type = 'info', duration = 5000) {
+            const toast = document.createElement('div');
+            toast.className = `toast toast-${type}`;
+            toast.textContent = msg;
+            document.body.appendChild(toast);
+            if (duration > 0) {
+                setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); }, duration);
+            }
+        }
+        function clearToasts() {
+            document.querySelectorAll('.toast').forEach(t => t.remove());
         }
 
         // Helpers
