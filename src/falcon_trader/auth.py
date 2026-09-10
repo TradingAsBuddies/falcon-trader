@@ -32,10 +32,12 @@ than starting open. That is the whole point of the issue.
 
 from __future__ import annotations
 
+import hashlib
 import hmac
 import logging
 import os
 import secrets
+import time as _time
 from dataclasses import dataclass
 from typing import Iterable, Optional, Sequence
 from urllib.parse import urlsplit
@@ -50,6 +52,12 @@ __all__ = [
     "SAFE_METHODS",
     "PUBLIC_PATHS",
     "constant_time_equals",
+    "issue_session",
+    "verify_session",
+    "session_nonce",
+    "normalize_path",
+    "CODE_EXECUTION_PATHS",
+    "UNSAFE_GET_PATHS",
     "extract_bearer_token",
     "is_public_path",
     "origin_allowed",
@@ -68,7 +76,32 @@ SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 #: Paths reachable with no credential at all. Deliberately tiny.
 #: ``/health`` is here so container and gateway health checks keep working;
 #: it exposes no account data.
-PUBLIC_PATHS = ("/health", "/login", "/static/", "/favicon.ico")
+PUBLIC_PATHS = ("/health", "/login", "/favicon.ico")
+
+#: Endpoints that execute caller-supplied code, directly or eventually. Every
+#: one of these requires FALCON_ALLOW_DEPLOY on top of authentication.
+#:
+#: This started as a single hard-coded check on /api/strategy/deploy, which was
+#: wrong: /api/strategy/backtest hands `code` to the same
+#: exec_module()+subprocess.run() path in strategy_manager.run_backtest() with
+#: *no* validation at all, and /api/strategy/rollback restores a file into the
+#: installed package directory. Gating one of three was security theatre.
+CODE_EXECUTION_PATHS = frozenset({
+    "/api/strategy/deploy",
+    "/api/strategy/backtest",
+    "/api/strategy/rollback",
+    "/api/strategy/validate",
+})
+
+#: GET endpoints that change state. Flask defaults to GET-only, and several
+#: handlers that start or stop the trading bot were written without
+#: ``methods=``. They are state-changing regardless of verb, so the CSRF check
+#: must treat them as unsafe -- otherwise an <img src> on any same-origin page
+#: halts the trading bot.
+UNSAFE_GET_PATHS = frozenset({
+    "/api/bot/start",
+    "/api/bot/stop",
+})
 
 #: Minimum token length. A short shared secret on a LAN-reachable trading box
 #: is not meaningfully better than none.
@@ -118,6 +151,71 @@ class Decision:
 # primitives
 # --------------------------------------------------------------------------
 
+def issue_session(token: str, ttl_seconds: int = 12 * 3600,
+                  now: Optional[int] = None) -> str:
+    """Mint a signed session value for the browser cookie.
+
+    The cookie used to be the raw ``FALCON_API_TOKEN``. Three things were wrong
+    with that: the permanent global secret was handed to the browser and to
+    anything co-resident on the origin (unauthenticated Grafana/Prometheus/
+    Consul under the same host and port receive it in their access logs);
+    ``/logout`` could not revoke it, because deleting the browser's copy leaves
+    the credential valid everywhere; and it never expired.
+
+    The value is ``v1.<expiry>.<nonce>.<hmac>`` where the HMAC is over the
+    expiry and nonce keyed by the API token. It is verifiable with no server
+    state, expires on its own, and is useless as an API credential -- the API
+    still requires the real token.
+    """
+    now = int(_time.time()) if now is None else now
+    expiry = now + int(ttl_seconds)
+    nonce = secrets.token_urlsafe(12)
+    payload = f"{expiry}.{nonce}"
+    signature = hmac.new(
+        str(token).encode(), payload.encode(), hashlib.sha256
+    ).hexdigest()
+    return f"v1.{payload}.{signature}"
+
+
+def verify_session(cookie: Optional[str], token: Optional[str],
+                   now: Optional[int] = None,
+                   revoked: Optional[set] = None) -> bool:
+    """Validate a cookie minted by :func:`issue_session`."""
+    if not cookie or not token:
+        return False
+
+    parts = str(cookie).split(".")
+    if len(parts) != 4 or parts[0] != "v1":
+        return False
+
+    _, expiry_raw, nonce, signature = parts
+
+    try:
+        expiry = int(expiry_raw)
+    except (TypeError, ValueError):
+        return False
+
+    now = int(_time.time()) if now is None else now
+    if expiry <= now:
+        return False
+
+    if revoked is not None and nonce in revoked:
+        return False
+
+    expected = hmac.new(
+        str(token).encode(), f"{expiry_raw}.{nonce}".encode(), hashlib.sha256
+    ).hexdigest()
+    return hmac.compare_digest(signature, expected)
+
+
+def session_nonce(cookie: Optional[str]) -> Optional[str]:
+    """The nonce inside a session cookie, for revocation on logout."""
+    if not cookie:
+        return None
+    parts = str(cookie).split(".")
+    return parts[2] if len(parts) == 4 and parts[0] == "v1" else None
+
+
 def constant_time_equals(supplied: Optional[str], expected: Optional[str]) -> bool:
     """Compare two secrets without leaking length or content through timing.
 
@@ -146,6 +244,36 @@ def extract_bearer_token(
     if x_falcon_token and x_falcon_token.strip():
         return x_falcon_token.strip()
     return None
+
+
+def normalize_path(path: str) -> str:
+    """Reduce a request path to a single canonical form for matching.
+
+    The endpoint guards compared ``path.rstrip("/")`` against a literal, which
+    meant ``//api/strategy/deploy``, ``/api/strategy//deploy`` and
+    ``/api/./strategy/deploy`` all missed the check while still passing the
+    credential check -- an authenticated bypass of both the deploy guard and
+    the live-order guard.
+
+    Collapses repeated slashes, drops ``.`` segments, resolves ``..``, and
+    strips the trailing slash. Comparing normalized-to-normalized means a guard
+    cannot be dodged by respelling the path, whatever Werkzeug or a proxy in
+    front happens to do first.
+    """
+    if not path:
+        return "/"
+
+    segments = []
+    for part in path.split("/"):
+        if part == "" or part == ".":
+            continue
+        if part == "..":
+            if segments:
+                segments.pop()
+            continue
+        segments.append(part)
+
+    return "/" + "/".join(segments) if segments else "/"
 
 
 def is_public_path(path: str, public_paths: Sequence[str] = PUBLIC_PATHS) -> bool:
@@ -243,13 +371,24 @@ def decide(
 ) -> Decision:
     """Gate one request. Pure: no Flask, no globals, no I/O.
 
-    Order matters. Public paths short-circuit first; then the credential; then
-    CSRF; then the two endpoint-specific guards that the issue calls out
-    separately because authentication alone is not sufficient for them.
+    Order matters. CORS preflight and public paths short-circuit first; then the
+    credential; then CSRF; then the endpoint-specific guards that authentication
+    alone is not sufficient for.
+
+    All path matching happens on the *normalized* path, so a guard cannot be
+    dodged by respelling the URL.
     """
     method = (method or "GET").upper()
+    canonical = normalize_path(path)
 
-    if is_public_path(path):
+    # A CORS preflight carries no credentials by design -- the browser strips
+    # them -- so gating it on one makes cross-origin requests impossible rather
+    # than merely restricted. The preflight reveals nothing and performs no
+    # action; the actual request that follows is gated normally.
+    if method == "OPTIONS":
+        return Decision.allow()
+
+    if is_public_path(canonical):
         return Decision.allow()
 
     if not config.enabled:
@@ -261,32 +400,36 @@ def decide(
     # --- credential ---
     supplied = extract_bearer_token(authorization, x_falcon_token)
     has_token = constant_time_equals(supplied, config.token)
-    has_session = constant_time_equals(session_cookie, config.token)
+    has_session = verify_session(session_cookie, config.token)
 
     if not (has_token or has_session):
         return Decision.deny(401, "Authentication required", "no_credential")
 
     # --- CSRF, cookie-authenticated state changes only ---
-    if method not in SAFE_METHODS and has_session and not has_token:
+    # UNSAFE_GET_PATHS is why this is not simply `method not in SAFE_METHODS`:
+    # /api/bot/start and /api/bot/stop are state-changing GETs.
+    state_changing = method not in SAFE_METHODS or canonical in UNSAFE_GET_PATHS
+    if state_changing and has_session and not has_token:
         if not origin_allowed(origin, referer, host, config.allowed_origins):
             return Decision.deny(403, "Cross-origin request rejected", "bad_origin")
 
-    # --- remote code execution surface ---
-    # Authentication is necessary but not sufficient here: this endpoint writes
-    # caller-supplied Python into the installed package and executes it. It stays
-    # off unless someone deliberately turns it on.
-    if path.rstrip("/") == "/api/strategy/deploy" and method == "POST":
+    # --- code execution surface ---
+    # Authentication is necessary but not sufficient. These endpoints hand
+    # caller-supplied Python to exec_module()/subprocess, or write files into
+    # the installed package. They stay off unless deliberately enabled.
+    if canonical in CODE_EXECUTION_PATHS and method in ("POST", "PUT", "PATCH"):
         if not config.allow_deploy:
             return Decision.deny(
                 403,
-                "Strategy deploy is disabled. Set FALCON_ALLOW_DEPLOY=1 to enable.",
+                f"{canonical} executes caller-supplied code and is disabled. "
+                "Set FALCON_ALLOW_DEPLOY=1 to enable.",
                 "deploy_disabled",
             )
 
     # --- real money ---
-    # A live broker order needs an explicit per-request opt-in, so that a client
+    # A live broker order needs an explicit per-request opt-in, so a client
     # holding a valid token cannot place one by accident.
-    if path.rstrip("/") == "/api/order" and method == "POST":
+    if canonical == "/api/order" and method == "POST":
         if execution_backend == "das" and das_live and config.require_live_header:
             if (live_header or "").strip() != "1":
                 return Decision.deny(
@@ -366,6 +509,11 @@ def install(app, config: AuthConfig, runtime_config=None):
 
     runtime_config = {} if runtime_config is None else runtime_config
 
+    # Nonces revoked by /logout. In-process only: it is cleared by a restart,
+    # which also invalidates every outstanding session anyway if the token is
+    # rotated. Bounded so a logout loop cannot grow it without limit.
+    _revoked: set = set()
+
     @app.before_request
     def _gate():  # pragma: no cover - exercised through the app, not unit tests
         decision = decide(
@@ -374,7 +522,11 @@ def install(app, config: AuthConfig, runtime_config=None):
             path=request.path,
             authorization=request.headers.get("Authorization"),
             x_falcon_token=request.headers.get("X-Falcon-Token"),
-            session_cookie=request.cookies.get(SESSION_COOKIE),
+            session_cookie=(
+                None
+                if session_nonce(request.cookies.get(SESSION_COOKIE)) in _revoked
+                else request.cookies.get(SESSION_COOKIE)
+            ),
             origin=request.headers.get("Origin"),
             referer=request.headers.get("Referer"),
             host=request.headers.get("Host"),
@@ -429,21 +581,28 @@ def install(app, config: AuthConfig, runtime_config=None):
                 {"Content-Type": "text/html; charset=utf-8"},
             )
 
+        ttl = 60 * 60 * 12
         response = make_response(redirect("/"))
         response.set_cookie(
             SESSION_COOKIE,
-            config.token,
+            issue_session(config.token, ttl_seconds=ttl),
             httponly=True,
             samesite="Strict",
             secure=config.cookie_secure,
-            max_age=60 * 60 * 12,
+            max_age=ttl,
+            path="/",
         )
         return response
 
     @app.route("/logout", methods=["GET", "POST"])
     def _logout():  # pragma: no cover - trivial adapter
+        # Revoke server-side, not just in the browser. The old cookie was the
+        # API token itself, so deleting the browser copy revoked nothing.
+        nonce = session_nonce(request.cookies.get(SESSION_COOKIE))
+        if nonce:
+            _revoked.add(nonce)
         response = make_response(redirect("/login"))
-        response.delete_cookie(SESSION_COOKIE)
+        response.delete_cookie(SESSION_COOKIE, path="/")
         return response
 
     return app

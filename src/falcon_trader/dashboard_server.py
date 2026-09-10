@@ -302,12 +302,31 @@ def place_order():
         return jsonify({"error": "Quantity must be a positive number"}), 400
 
     # --- DAS SIM backend ---
-    if RUNTIME_CONFIG.get("execution_backend") == "das":
+    # Read the backend ONCE and re-check the live opt-in against that same read.
+    #
+    # The auth gate checks X-Falcon-Live at before_request, and this handler
+    # used to re-read RUNTIME_CONFIG afterwards. With threaded=True a concurrent
+    # POST /api/config flipping "paper" -> "das" between the two reads produced
+    # a live broker order that never passed the header check -- precisely the
+    # accident the guard exists to prevent (falcon-trader#25, #26). The check
+    # now happens at the point of use, against the value actually used.
+    backend = str(RUNTIME_CONFIG.get("execution_backend", "paper")).lower()
+    if backend == "das":
         if not DAS_AVAILABLE:
             return jsonify({"error": "DAS backend unavailable"}), 503
+
+        das_live = os.getenv("FALCON_DAS_LIVE") == "1"
+        if das_live and AUTH_CONFIG.require_live_header:
+            if (request.headers.get("X-Falcon-Live") or "").strip() != "1":
+                return jsonify({
+                    "status": "error",
+                    "reason": "live_header_missing",
+                    "error": "Live order requires the X-Falcon-Live: 1 header",
+                }), 403
+
         client = None
         try:
-            client = DASExecutionClient(live=(os.getenv("FALCON_DAS_LIVE") == "1"))
+            client = DASExecutionClient(live=das_live)
             client.connect()
             ok, resp = client.login()
             if not ok:
@@ -664,7 +683,7 @@ def get_bot_status():
         "startTime": getattr(bot, 'start_time', None)
     })
 
-@app.route('/api/bot/start')
+@app.route('/api/bot/start', methods=['GET', 'POST'])
 def start_bot():
     """Start the trading bot"""
     if not bot:
@@ -676,7 +695,7 @@ def start_bot():
     bot.start()
     return jsonify({"message": "Bot started successfully"})
 
-@app.route('/api/bot/stop')
+@app.route('/api/bot/stop', methods=['GET', 'POST'])
 def stop_bot():
     """Stop the trading bot"""
     if not bot:
