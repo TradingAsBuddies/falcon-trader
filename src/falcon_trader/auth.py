@@ -154,9 +154,23 @@ def is_public_path(path: str, public_paths: Sequence[str] = PUBLIC_PATHS) -> boo
     Prefix entries end with ``/``; everything else must match exactly. Matching
     ``/health`` as a prefix would also expose ``/healthcheck-internal`` or any
     future sibling, so exact-match is the default.
+
+    Traversal is rejected outright. Without this, ``/static/../api/strategy/deploy``
+    matches the ``/static/`` prefix and is treated as public -- reaching the
+    remote-code-execution endpoint with no credential. Werkzeug normally
+    normalizes ``..`` out of ``request.path`` before routing, so this is very
+    likely unreachable through Flask; the gate must not depend on that being
+    true of every server, proxy, and future Werkzeug version in front of it.
     """
     if not path:
         return False
+
+    # Reject traversal and encoded separators before any matching. A path that
+    # needs normalizing is not a path this function should be judging.
+    lowered = path.lower()
+    if ".." in path or "%2e" in lowered or "%2f" in lowered or "\\" in path:
+        return False
+
     for entry in public_paths:
         if entry.endswith("/"):
             if path.startswith(entry):

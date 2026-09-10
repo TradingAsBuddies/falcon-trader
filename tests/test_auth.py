@@ -168,6 +168,44 @@ def test_static_is_a_prefix_match():
     assert is_public_path("/static/app.css") is True
 
 
+@pytest.mark.parametrize("path", [
+    "/static/../api/strategy/deploy",
+    "/static/..%2fapi/strategy/deploy",
+    "/static/%2e%2e/api/strategy/deploy",
+    "/static/%2E%2E/api/strategy/deploy",
+    "/static/..\\api/strategy/deploy",
+    "/health/../api/order",
+])
+def test_traversal_out_of_a_public_prefix_is_not_public(path):
+    """Found by probing: /static/ is a prefix rule, so /static/../api/... matched.
+
+    Werkzeug normalizes `..` out of request.path before routing, so this was
+    very likely unreachable through Flask -- but the gate must not depend on
+    that being true of every proxy and Werkzeug version in front of it.
+    """
+    assert is_public_path(path) is False
+
+
+@pytest.mark.parametrize("path", [
+    "/static/../api/strategy/deploy",
+    "/static/%2e%2e/api/strategy/deploy",
+])
+def test_traversal_cannot_reach_deploy_unauthenticated(path):
+    d = call(method="POST", path=path)
+    assert d.allowed is False
+    assert d.status == 401
+
+
+@pytest.mark.parametrize("path", [
+    "//api/strategy/deploy",
+    "/API/STRATEGY/DEPLOY",
+    "/api/strategy/deploy%00",
+    "/api/strategy/deploy/",
+])
+def test_path_mangling_does_not_bypass_the_gate(path):
+    assert call(method="POST", path=path).allowed is False
+
+
 def test_dashboard_pages_are_not_public():
     for path in ("/", "/dashboard", "/trading", "/advisor", "/orchestrator"):
         assert call(path=path).allowed is False, f"{path} must not be public"
