@@ -14,6 +14,8 @@ from typing import Optional, Dict, List
 from dataclasses import dataclass
 
 from falcon_core import DatabaseManager
+from falcon_trader.symbol_state import load_symbol_state
+from falcon_trader.trading_guards import CooldownPolicy, check_cooldown
 from falcon_trader.orchestrator.utils.data_structures import Position
 
 
@@ -78,6 +80,10 @@ class BaseStrategyEngine:
         # Get routing config
         self.routing_config = config.get('routing', {})
         self.min_stop_buffer = self.routing_config.get('min_stop_loss_buffer', 0.05)
+
+        # Per-symbol churn limits, driven from the orchestrator config
+        # (falcon-trader#24). Thresholds live in config, not in the code.
+        self.cooldown_policy = CooldownPolicy.from_config(config.get('cooldown'))
 
     def get_position(self, symbol: str) -> Optional[Position]:
         """
@@ -169,6 +175,27 @@ class BaseStrategyEngine:
             ExecutionResult with trade details
         """
         try:
+            # Churn gate (falcon-trader#24). The only prior check was for a
+            # *simultaneous* duplicate position below -- once a position closed,
+            # the symbol was re-eligible on the very next cycle, which is how
+            # CDXS and PCVX were re-bought at a higher price hours after being
+            # sold at a loss.
+            state = load_symbol_state(self.db, symbol)
+            cooldown = check_cooldown(
+                symbol,
+                self.cooldown_policy,
+                last_exit_at=state.last_exit_at,
+                loss_streak=state.loss_streak,
+                round_trips_today=state.round_trips_today,
+            )
+            if not cooldown.allowed:
+                print(f"  [BLOCKED] {symbol}: {cooldown.message}")
+                return ExecutionResult(
+                    success=False,
+                    symbol=symbol,
+                    error=f"{cooldown.reason}: {cooldown.message}",
+                )
+
             # Check if we already have a position
             existing = self.get_position(symbol)
             if existing:
@@ -208,21 +235,47 @@ class BaseStrategyEngine:
                     stop_loss, profit_target, strategy, last_updated
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT(symbol) DO UPDATE SET
-                    quantity = quantity + %s,
+                    -- Recompute the blended entry price. Incrementing quantity
+                    -- while leaving entry_price at the first fill made avgPrice
+                    -- wrong for every scaled-in position (falcon-trader#22).
+                    entry_price = (
+                        (positions.entry_price * positions.quantity)
+                        + (excluded.entry_price * excluded.quantity)
+                    ) / (positions.quantity + excluded.quantity),
+                    quantity = positions.quantity + excluded.quantity,
                     last_updated = %s
             """, (
                 symbol, quantity, price, datetime.now().isoformat(),
                 stop_loss, profit_target, self.strategy_name,
                 datetime.now().isoformat(),
-                quantity, datetime.now().isoformat()
+                datetime.now().isoformat()
             ))
 
-            # Update cash balance
-            new_cash = cash - cost
-            self.db.execute(
-                "UPDATE account SET cash = %s, last_updated = %s",
-                (new_cash, datetime.now().isoformat())
+            # Debit cash atomically (falcon-trader#22). This was a
+            # read-modify-write with no WHERE clause, racing the Flask thread
+            # and the paper bot -- interleaved debits were simply lost, and the
+            # missing WHERE meant it rewrote every row if more than one existed.
+            # RETURNING rather than a row count -- DatabaseManager.execute
+            # returns lastrowid on SQLite and rowcount on Postgres, so a count
+            # comparison silently never fires on SQLite.
+            debited = self.db.execute(
+                """UPDATE account
+                      SET cash = cash - %s, last_updated = %s
+                    WHERE id = (SELECT id FROM account ORDER BY id LIMIT 1)
+                      AND cash >= %s
+                RETURNING cash""",
+                (cost, datetime.now().isoformat(), cost),
+                fetch='one',
             )
+            if not debited:
+                return ExecutionResult(
+                    success=False,
+                    symbol=symbol,
+                    error=(
+                        f"Insufficient funds for {quantity} {symbol} at "
+                        f"${price:,.4f} (lost the race for ${cost:,.2f})"
+                    ),
+                )
 
             return ExecutionResult(
                 success=True,
@@ -301,13 +354,13 @@ class BaseStrategyEngine:
                     (new_quantity, datetime.now().isoformat(), symbol)
                 )
 
-            # Update cash balance
+            # Credit proceeds atomically (falcon-trader#22).
             proceeds = quantity * price
-            cash = self.get_account_balance()
-            new_cash = cash + proceeds
             self.db.execute(
-                "UPDATE account SET cash = %s, last_updated = %s",
-                (new_cash, datetime.now().isoformat())
+                """UPDATE account
+                      SET cash = cash + %s, last_updated = %s
+                    WHERE id = (SELECT id FROM account ORDER BY id LIMIT 1)""",
+                (proceeds, datetime.now().isoformat()),
             )
 
             return ExecutionResult(

@@ -7,6 +7,8 @@ import os
 import sys
 import yaml
 import time
+
+from falcon_trader import trading_guards
 from datetime import datetime
 from falcon_trader.orchestrator.execution.trade_executor import TradeExecutor
 from falcon_trader.orchestrator.monitors.performance_tracker import PerformanceTracker
@@ -100,6 +102,24 @@ def monitor_positions(executor, tracker):
         elif action == 'SELL':
             reason = result.get('reason', 'Exit signal')
             print(f"  [EXIT] {symbol}: {reason}")
+
+
+def flatten_positions(executor, tracker, reason='eod'):
+    """Close all open positions at the end of the session (falcon-trader#23)."""
+
+    print_section(f"END-OF-DAY FLATTEN (reason={reason})")
+
+    results = executor.flatten_positions(reason=reason)
+
+    if not results:
+        print("[INFO] No open positions to flatten")
+        return
+
+    closed = [r for r in results if r.get('action') == 'SELL']
+    skipped = [r for r in results if r.get('action') != 'SELL']
+    print(f"[EOD] Closed {len(closed)} position(s); {len(skipped)} not closed")
+    for r in skipped:
+        print(f"  [OPEN] {r['symbol']}: {r.get('reason')}")
 
 
 def show_performance_summary(tracker, days=7):
@@ -229,11 +249,38 @@ def main():
 
         try:
             cycle = 0
+            last_block = None
+            flattened_for = None
             while True:
+                # Market-hours gate. This 5-minute cycle ran around the clock,
+                # and monitor_positions() landing after the close is exactly
+                # what produced the 16:50 SELL burst (falcon-trader#23).
+                session = trading_guards.check_market_open()
+                if not session.allowed:
+                    if last_block != session.reason:
+                        print(f"\n[IDLE] {session.message}")
+                        last_block = session.reason
+                    time.sleep(300)
+                    continue
+                last_block = None
+
                 cycle += 1
                 print(f"\n{'='*80}")
                 print(f"CYCLE {cycle} - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
                 print(f"{'='*80}")
+
+                # End-of-day flatten. Deliberate, once per session, with
+                # reason='eod' on the trade rows -- as opposed to positions
+                # simply carrying and being closed by whichever cycle happened
+                # to run last (falcon-trader#23).
+                today = datetime.now().date()
+                if trading_guards.should_flatten():
+                    if flattened_for != today:
+                        print("[EOD] Flatten window reached; closing open positions")
+                        flatten_positions(executor, tracker, reason='eod')
+                        flattened_for = today
+                    time.sleep(60)
+                    continue
 
                 # Process screener results
                 process_screener_results(executor, tracker)

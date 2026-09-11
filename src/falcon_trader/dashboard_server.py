@@ -1,4 +1,5 @@
 import os
+import logging
 from flask import Flask, jsonify, send_file, request, redirect
 from flask_cors import CORS
 from werkzeug.exceptions import HTTPException
@@ -7,6 +8,8 @@ import threading
 import time
 from datetime import datetime
 from falcon_core import get_db_manager, FalconConfig
+
+from falcon_trader import auth, portfolio
 
 # Optional YouTube strategy support
 try:
@@ -65,7 +68,31 @@ RUNTIME_CONFIG = {
 # from paper_trading_bot import PaperTradingBot, MassiveRealTimeFeed
 
 app = Flask(__name__)
-CORS(app)  # Enable CORS for web dashboard
+
+# Authentication (falcon-trader#25). Resolved at import so a misconfigured
+# deployment fails loudly at start rather than serving strategy deployment and
+# order placement to the whole LAN. See falcon_trader/auth.py for the design.
+AUTH_CONFIG = auth.load_config()
+
+# CORS is restricted to the origins named in FALCON_CORS_ORIGINS. It used to be
+# a bare CORS(app) -- every origin, credentials included -- which meant any page
+# a LAN browser visited could drive this API. With no origins configured, no
+# cross-origin allowance is sent at all; the dashboard itself is same-origin and
+# does not need one.
+if AUTH_CONFIG.allowed_origins:
+    CORS(
+        app,
+        origins=list(AUTH_CONFIG.allowed_origins),
+        supports_credentials=True,
+        allow_headers=["Content-Type", "Authorization", "X-Falcon-Token",
+                       "X-Falcon-Live"],
+    )
+else:
+    logging.getLogger(__name__).info(
+        "FALCON_CORS_ORIGINS is unset; no cross-origin access will be granted."
+    )
+
+auth.install(app, AUTH_CONFIG, RUNTIME_CONFIG)
 
 
 @app.errorhandler(Exception)
@@ -141,6 +168,55 @@ def health():
     """Health check endpoint for container orchestration"""
     return jsonify({"status": "healthy", "service": "falcon-trading"}), 200
 
+def _held_positions_and_prices():
+    """One price map for every open position, shared by /api/account and
+    /api/positions.
+
+    These two endpoints used to compute the same quantity from two different
+    price sources -- the bot's own per-position get_quote for totalValue, and a
+    dashboard-side recomputation that fell back to avgPrice for positionsValue.
+    They disagreed by $361.74 on the live account (falcon-trader#22).
+    """
+    positions = bot.get_positions() or []
+    symbols = [p['symbol'] for p in positions]
+    prices = bot.get_current_prices(symbols) if symbols else {}
+    normalized = [
+        {
+            "symbol": p['symbol'],
+            "quantity": int(p['quantity']),
+            "avgPrice": float(p.get('average_price', 0) or 0),
+        }
+        for p in positions
+    ]
+    return normalized, prices
+
+
+def _initial_balance(account):
+    """Initial balance from the account row, not a hardcoded 10000.0."""
+    for key in ('initial_balance', 'initialBalance', 'starting_balance'):
+        value = account.get(key) if hasattr(account, 'get') else None
+        if value is not None:
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                pass
+    # falcon-core's account table is (id, cash, last_updated) -- there is no
+    # initial_balance column, so this query raises on both SQLite and Postgres
+    # until a core migration adds one. Guarded rather than assumed: an
+    # unguarded SELECT here 500s /api/account, which is worse than falling back
+    # to the configured default.
+    try:
+        row = db.execute(
+            "SELECT initial_balance FROM account ORDER BY id LIMIT 1",
+            fetch='one',
+        )
+    except Exception:
+        row = None
+    if row and row.get('initial_balance') is not None:
+        return float(row['initial_balance'])
+    return float(os.getenv('FALCON_INITIAL_BALANCE', '10000'))
+
+
 @app.route('/api/account')
 def get_account():
     """Get current account information"""
@@ -148,21 +224,34 @@ def get_account():
         return jsonify({"error": "Bot not initialized"}), 503
 
     account = bot.get_account()
+    positions, prices = _held_positions_and_prices()
 
-    # Calculate positions value
-    positions = bot.get_positions()
-    current_prices = bot.get_current_prices()
-    positions_value = 0.0
-    for pos in positions:
-        current_price = float(current_prices.get(pos['symbol'], pos.get('average_price', 0)))
-        positions_value += current_price * float(pos['quantity'])
+    realized = db.execute(
+        "SELECT COALESCE(SUM(pnl), 0) AS realized FROM orders", fetch='one',
+    )
+    realized_pnl = float(realized['realized']) if realized else 0.0
 
-    return jsonify({
-        "totalValue": account['total_value'],
-        "cash": account['cash'],
-        "positionsValue": positions_value,
-        "initialBalance": 10000.0  # TODO: Store this in database
-    })
+    valuation = portfolio.value_account(
+        cash=float(account['cash']),
+        initial_balance=_initial_balance(account),
+        positions=positions,
+        price_map=prices,
+        realized_pnl=realized_pnl,
+    )
+
+    payload = valuation.to_dict()
+
+    # Surface the invariant rather than letting the books drift silently.
+    report = portfolio.check_invariant(valuation)
+    payload["invariantOk"] = report.ok
+    if not report.ok:
+        payload["invariantDifference"] = round(report.difference, 4)
+        logging.getLogger(__name__).error(
+            "Account invariant violated by %.4f: %s",
+            report.difference, report.details,
+        )
+
+    return jsonify(payload)
 
 @app.route('/api/positions')
 def get_positions():
@@ -170,26 +259,35 @@ def get_positions():
     if not bot:
         return jsonify({"error": "Bot not initialized"}), 503
 
-    positions = bot.get_positions()
-    current_prices = bot.get_current_prices()
+    positions, prices = _held_positions_and_prices()
 
-    # Get stop-loss data from database
     positions_list = []
     for pos in positions:
         symbol = pos['symbol']
-        current_price = float(current_prices.get(symbol, pos.get('average_price', 0)))
+        mark = portfolio.mark_position(
+            symbol, pos['quantity'], pos['avgPrice'], prices,
+        )
 
-        # Get stop-loss for this position
-        row = db.execute('SELECT stop_loss FROM positions WHERE symbol = %s', (symbol,), fetch='one')
+        row = db.execute(
+            'SELECT stop_loss, current_price, last_updated FROM positions '
+            'WHERE symbol = %s',
+            (symbol,), fetch='one',
+        )
         stop_loss = float(row['stop_loss']) if row and row.get('stop_loss') else None
 
-        positions_list.append({
-            "symbol": symbol,
-            "quantity": int(pos['quantity']),
-            "avgPrice": float(pos.get('average_price', 0)),
-            "currentPrice": current_price,
-            "stopLoss": stop_loss
-        })
+        entry = mark.to_dict()
+        # Fall back to the persisted mark (written by the price-refresh path)
+        # before declaring the position stale.
+        if entry["currentPrice"] is None and row and row.get('current_price'):
+            entry["currentPrice"] = float(row['current_price'])
+            entry["stale"] = True
+            entry["markSource"] = "db"
+        else:
+            entry["markSource"] = "live" if not mark.stale else "none"
+
+        entry["stopLoss"] = stop_loss
+        entry["markedAt"] = row.get('last_updated') if row else None
+        positions_list.append(entry)
 
     return jsonify(positions_list)
 
@@ -213,12 +311,31 @@ def place_order():
         return jsonify({"error": "Quantity must be a positive number"}), 400
 
     # --- DAS SIM backend ---
-    if RUNTIME_CONFIG.get("execution_backend") == "das":
+    # Read the backend ONCE and re-check the live opt-in against that same read.
+    #
+    # The auth gate checks X-Falcon-Live at before_request, and this handler
+    # used to re-read RUNTIME_CONFIG afterwards. With threaded=True a concurrent
+    # POST /api/config flipping "paper" -> "das" between the two reads produced
+    # a live broker order that never passed the header check -- precisely the
+    # accident the guard exists to prevent (falcon-trader#25, #26). The check
+    # now happens at the point of use, against the value actually used.
+    backend = str(RUNTIME_CONFIG.get("execution_backend", "paper")).lower()
+    if backend == "das":
         if not DAS_AVAILABLE:
             return jsonify({"error": "DAS backend unavailable"}), 503
+
+        das_live = os.getenv("FALCON_DAS_LIVE") == "1"
+        if das_live and AUTH_CONFIG.require_live_header:
+            if (request.headers.get("X-Falcon-Live") or "").strip() != "1":
+                return jsonify({
+                    "status": "error",
+                    "reason": "live_header_missing",
+                    "error": "Live order requires the X-Falcon-Live: 1 header",
+                }), 403
+
         client = None
         try:
-            client = DASExecutionClient(live=(os.getenv("FALCON_DAS_LIVE") == "1"))
+            client = DASExecutionClient(live=das_live)
             client.connect()
             ok, resp = client.login()
             if not ok:
@@ -575,7 +692,7 @@ def get_bot_status():
         "startTime": getattr(bot, 'start_time', None)
     })
 
-@app.route('/api/bot/start')
+@app.route('/api/bot/start', methods=['GET', 'POST'])
 def start_bot():
     """Start the trading bot"""
     if not bot:
@@ -587,7 +704,7 @@ def start_bot():
     bot.start()
     return jsonify({"message": "Bot started successfully"})
 
-@app.route('/api/bot/stop')
+@app.route('/api/bot/stop', methods=['GET', 'POST'])
 def stop_bot():
     """Stop the trading bot"""
     if not bot:
@@ -2426,15 +2543,22 @@ def main():
     # Signal/Risk tab: ANTHROPIC_API_KEY (preferred) / PERPLEXITY_API_KEY (fallback)
     # are read at request time in /api/risk-analysis; if both are absent the
     # structured flags still render and the narrative uses the library fallback.
-    # Get API keys from environment variables (preferred) or command line
+    # API keys come from the environment only. They used to be accepted
+    # positionally on sys.argv, which put them in `ps` output for every user on
+    # the host (falcon-trader#25). Anyone still passing them that way is told
+    # rather than silently starting with a key on the process line.
     MASSIVE_API_KEY = os.getenv('MASSIVE_API_KEY') or os.getenv('POLYGON_API_KEY', '')
     CLAUDE_API_KEY = os.getenv('CLAUDE_API_KEY') or os.getenv('ANTHROPIC_API_KEY', '')
 
-    # Command line overrides (for backwards compatibility)
-    if len(sys.argv) > 1:
-        MASSIVE_API_KEY = sys.argv[1]
-    if len(sys.argv) > 2:
-        CLAUDE_API_KEY = sys.argv[2]
+    if len(sys.argv) > 1 and not sys.argv[1].startswith('-'):
+        print(
+            "ERROR: API keys are no longer accepted as command-line arguments -- "
+            "they are visible in `ps` to every user on the host.\n"
+            "       Set MASSIVE_API_KEY and CLAUDE_API_KEY in the environment "
+            "instead.",
+            file=sys.stderr,
+        )
+        return 2
 
     # Initialize YouTube strategy extractor if Claude API key is available
     if YOUTUBE_AVAILABLE and CLAUDE_API_KEY:
@@ -2488,9 +2612,27 @@ def main():
     print(f"  - POST /api/youtube-strategies/submit - Submit YouTube URL")
     print("="*80 + "\n")
 
-    # Run Flask server
-    app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)
+    # Run Flask server.
+    #
+    # Loopback by default. Binding 0.0.0.0 unconditionally is what put an
+    # unauthenticated deploy-and-execute endpoint on the LAN (falcon-trader#25).
+    # In the container FALCON_BIND_HOST is set to 0.0.0.0 deliberately, because
+    # there the pod network -- with Traefik and its auth middleware in front --
+    # is the boundary.
+    print(f"Binding {AUTH_CONFIG.bind_host}:{AUTH_CONFIG.bind_port}")
+    if AUTH_CONFIG.bind_host == '0.0.0.0':
+        print("NOTE: bound to all interfaces. Ensure the gateway auth "
+              "middleware is in front of this (falcon-gateway#1).")
+    app.run(
+        host=AUTH_CONFIG.bind_host,
+        port=AUTH_CONFIG.bind_port,
+        debug=False,
+        threaded=True,
+    )
+    return 0
 
 
 if __name__ == '__main__':
-    main()
+    import sys
+
+    sys.exit(main())
