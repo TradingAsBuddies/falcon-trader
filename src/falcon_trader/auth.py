@@ -38,6 +38,7 @@ import logging
 import os
 import secrets
 import time as _time
+from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Iterable, Optional, Sequence
 from urllib.parse import urlsplit
@@ -57,6 +58,7 @@ __all__ = [
     "session_nonce",
     "normalize_path",
     "CODE_EXECUTION_PATHS",
+    "CODE_EXECUTION_PREFIXES",
     "UNSAFE_GET_PATHS",
     "extract_bearer_token",
     "is_public_path",
@@ -93,6 +95,20 @@ CODE_EXECUTION_PATHS = frozenset({
     "/api/strategy/validate",
 })
 
+#: Path prefixes that execute caller- or LLM-supplied code. Same gate as
+#: CODE_EXECUTION_PATHS, but matched by prefix because the route carries an id.
+#: /api/strategies/youtube/<id>/activate runs LLM-generated strategy code
+#: through run_backtest, which is the same exec_module path as deploy.
+CODE_EXECUTION_PREFIXES = ("/api/strategies/youtube/",)
+
+
+def _is_code_execution_path(canonical: str) -> bool:
+    """True when the path executes code and needs FALCON_ALLOW_DEPLOY."""
+    if canonical in CODE_EXECUTION_PATHS:
+        return True
+    return any(canonical.startswith(p) and canonical.endswith("/activate")
+               for p in CODE_EXECUTION_PREFIXES)
+
 #: GET endpoints that change state. Flask defaults to GET-only, and several
 #: handlers that start or stop the trading bot were written without
 #: ``methods=``. They are state-changing regardless of verb, so the CSRF check
@@ -106,6 +122,10 @@ UNSAFE_GET_PATHS = frozenset({
 #: Minimum token length. A short shared secret on a LAN-reachable trading box
 #: is not meaningfully better than none.
 MIN_TOKEN_LENGTH = 24
+
+#: Cap on remembered logout nonces. Sessions expire on their own, so this only
+#: needs to cover the window between a logout and that cookie's expiry.
+MAX_REVOKED_NONCES = 4096
 
 
 class AuthConfigError(RuntimeError):
@@ -417,7 +437,7 @@ def decide(
     # Authentication is necessary but not sufficient. These endpoints hand
     # caller-supplied Python to exec_module()/subprocess, or write files into
     # the installed package. They stay off unless deliberately enabled.
-    if canonical in CODE_EXECUTION_PATHS and method in ("POST", "PUT", "PATCH"):
+    if _is_code_execution_path(canonical) and method in ("POST", "PUT", "PATCH"):
         if not config.allow_deploy:
             return Decision.deny(
                 403,
@@ -509,10 +529,17 @@ def install(app, config: AuthConfig, runtime_config=None):
 
     runtime_config = {} if runtime_config is None else runtime_config
 
-    # Nonces revoked by /logout. In-process only: it is cleared by a restart,
-    # which also invalidates every outstanding session anyway if the token is
-    # rotated. Bounded so a logout loop cannot grow it without limit.
-    _revoked: set = set()
+    # Nonces revoked by /logout. In-process only: a restart clears it, which is
+    # sound because every session it could revoke expires within the cookie TTL
+    # anyway. Bounded with a FIFO so a logout loop cannot grow it without limit
+    # -- an evicted nonce is at worst a session that stays valid until its own
+    # expiry, which is the pre-revocation behaviour.
+    _revoked: "OrderedDict[str, None]" = OrderedDict()
+
+    def _revoke(nonce: str) -> None:
+        _revoked[nonce] = None
+        while len(_revoked) > MAX_REVOKED_NONCES:
+            _revoked.popitem(last=False)
 
     @app.before_request
     def _gate():  # pragma: no cover - exercised through the app, not unit tests
@@ -600,7 +627,7 @@ def install(app, config: AuthConfig, runtime_config=None):
         # API token itself, so deleting the browser copy revoked nothing.
         nonce = session_nonce(request.cookies.get(SESSION_COOKIE))
         if nonce:
-            _revoked.add(nonce)
+            _revoke(nonce)
         response = make_response(redirect("/login"))
         response.delete_cookie(SESSION_COOKIE, path="/")
         return response

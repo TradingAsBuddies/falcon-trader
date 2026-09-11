@@ -235,21 +235,47 @@ class BaseStrategyEngine:
                     stop_loss, profit_target, strategy, last_updated
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT(symbol) DO UPDATE SET
-                    quantity = quantity + %s,
+                    -- Recompute the blended entry price. Incrementing quantity
+                    -- while leaving entry_price at the first fill made avgPrice
+                    -- wrong for every scaled-in position (falcon-trader#22).
+                    entry_price = (
+                        (positions.entry_price * positions.quantity)
+                        + (excluded.entry_price * excluded.quantity)
+                    ) / (positions.quantity + excluded.quantity),
+                    quantity = positions.quantity + excluded.quantity,
                     last_updated = %s
             """, (
                 symbol, quantity, price, datetime.now().isoformat(),
                 stop_loss, profit_target, self.strategy_name,
                 datetime.now().isoformat(),
-                quantity, datetime.now().isoformat()
+                datetime.now().isoformat()
             ))
 
-            # Update cash balance
-            new_cash = cash - cost
-            self.db.execute(
-                "UPDATE account SET cash = %s, last_updated = %s",
-                (new_cash, datetime.now().isoformat())
+            # Debit cash atomically (falcon-trader#22). This was a
+            # read-modify-write with no WHERE clause, racing the Flask thread
+            # and the paper bot -- interleaved debits were simply lost, and the
+            # missing WHERE meant it rewrote every row if more than one existed.
+            # RETURNING rather than a row count -- DatabaseManager.execute
+            # returns lastrowid on SQLite and rowcount on Postgres, so a count
+            # comparison silently never fires on SQLite.
+            debited = self.db.execute(
+                """UPDATE account
+                      SET cash = cash - %s, last_updated = %s
+                    WHERE id = (SELECT id FROM account ORDER BY id LIMIT 1)
+                      AND cash >= %s
+                RETURNING cash""",
+                (cost, datetime.now().isoformat(), cost),
+                fetch='one',
             )
+            if not debited:
+                return ExecutionResult(
+                    success=False,
+                    symbol=symbol,
+                    error=(
+                        f"Insufficient funds for {quantity} {symbol} at "
+                        f"${price:,.4f} (lost the race for ${cost:,.2f})"
+                    ),
+                )
 
             return ExecutionResult(
                 success=True,
@@ -328,13 +354,13 @@ class BaseStrategyEngine:
                     (new_quantity, datetime.now().isoformat(), symbol)
                 )
 
-            # Update cash balance
+            # Credit proceeds atomically (falcon-trader#22).
             proceeds = quantity * price
-            cash = self.get_account_balance()
-            new_cash = cash + proceeds
             self.db.execute(
-                "UPDATE account SET cash = %s, last_updated = %s",
-                (new_cash, datetime.now().isoformat())
+                """UPDATE account
+                      SET cash = cash + %s, last_updated = %s
+                    WHERE id = (SELECT id FROM account ORDER BY id LIMIT 1)""",
+                (proceeds, datetime.now().isoformat()),
             )
 
             return ExecutionResult(

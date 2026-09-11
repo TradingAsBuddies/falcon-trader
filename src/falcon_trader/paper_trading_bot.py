@@ -8,11 +8,13 @@ import os
 import time
 import requests
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 from falcon_core import DatabaseManager, FalconConfig
 
 from falcon_trader import portfolio, trading_guards
+from falcon_trader.risk_limits import KillSwitch
+from falcon_trader.symbol_state import load_symbol_state
 
 try:
     falcon_config = FalconConfig()
@@ -53,6 +55,14 @@ class PaperTradingBot:
             db_config = {'db_type': 'sqlite', 'db_path': 'paper_trading.db'}
 
         self.db = DatabaseManager(db_config)
+
+        # Churn limits and the kill switch. Both are consulted in place_order,
+        # which is the single chokepoint every entry path goes through.
+        self.cooldown_policy = trading_guards.CooldownPolicy.from_config(
+            (falcon_config.get('cooldown') if falcon_config
+             and hasattr(falcon_config, 'get') else None)
+        )
+        self.kill_switch = KillSwitch()
 
         # Initialize account if needed
         self._initialize_account(initial_balance)
@@ -128,45 +138,122 @@ class PaperTradingBot:
         return [dict(trade) for trade in trades] if trades else []
 
     def get_quote(self, symbol: str) -> Optional[Dict]:
+        """Get a current quote, preferring the latest minute bar.
+
+        The previous-close endpoint (``/v2/aggs/ticker/{sym}/prev``) returns
+        *yesterday's* daily bar. Pricing fills from it is what let orders
+        "fill" at 16:50 at the prior session's close (falcon-trader#23) -- and
+        once the stale-bar guard was added, it made every fill fail instead,
+        because a previous-session bar can never be from the current session.
+
+        Order of preference:
+
+        1. ``/v2/snapshot`` -- last trade, the real current price.
+        2. ``/v2/aggs/.../range/1/minute`` -- the most recent minute bar.
+        3. ``/prev`` -- previous close, returned with ``stale=True`` so the
+           caller can price marks from it but refuse to fill on it.
+
+        A DELAYED-tier key is accepted throughout: it returns ``status``
+        ``'DELAYED'`` with good results, and gating on ``'OK'`` alone made this
+        return ``None`` for every symbol (falcon-core fixed the same bug in
+        ``c491253``).
         """
-        Get quote from Polygon.io (uses previous close for free tier)
-
-        Args:
-            symbol: Stock symbol
-
-        Returns:
-            Dict with quote data or None
-        """
-        try:
-            # Use previous close endpoint (available on free tier)
-            url = f"https://api.polygon.io/v2/aggs/ticker/{symbol}/prev"
-            params = {'adjusted': 'true', 'apiKey': self.massive_api_key}
-
-            response = requests.get(url, params=params, timeout=10)
-
-            if response.status_code == 200:
-                data = response.json()
-                # A DELAYED-tier key returns status='DELAYED' with perfectly
-                # good results. Gating on 'OK' alone made get_quote return None
-                # for every symbol on this key (falcon-trader#23; falcon-core
-                # fixed the same bug in c491253 and it was never ported here).
-                if data.get('status') in ('OK', 'DELAYED') and data.get('results'):
-                    result = data['results'][0]
-                    return {
-                        'symbol': symbol,
-                        'price': result.get('c', 0),  # Close price
-                        'open': result.get('o', 0),
-                        'high': result.get('h', 0),
-                        'low': result.get('l', 0),
-                        'volume': result.get('v', 0),
-                        'timestamp': result.get('t', 0)
-                    }
-            else:
-                print(f"[BOT] Quote error for {symbol}: {response.status_code}")
-        except Exception as e:
-            print(f"[BOT] Error fetching quote for {symbol}: {e}")
-
+        for fetch in (self._quote_from_snapshot,
+                      self._quote_from_minute_agg,
+                      self._quote_from_prev_close):
+            try:
+                quote = fetch(symbol)
+            except Exception as e:
+                print(f"[BOT] {fetch.__name__} failed for {symbol}: {e}")
+                continue
+            if quote and quote.get('price'):
+                return quote
         return None
+
+    def _get_json(self, url: str, params: Optional[Dict] = None) -> Optional[Dict]:
+        """GET returning parsed JSON when the tier's status is usable."""
+        params = dict(params or {})
+        params['apiKey'] = self.massive_api_key
+        response = requests.get(url, params=params, timeout=10)
+        if response.status_code != 200:
+            print(f"[BOT] Quote error {response.status_code} for {url.rsplit('/', 1)[-1]}")
+            return None
+        data = response.json()
+        if data.get('status') in ('OK', 'DELAYED') or 'ticker' in data:
+            return data
+        return None
+
+    def _quote_from_snapshot(self, symbol: str) -> Optional[Dict]:
+        """Last trade from the snapshot endpoint -- the true current price."""
+        data = self._get_json(
+            "https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/"
+            f"tickers/{symbol}"
+        )
+        ticker = (data or {}).get('ticker') or {}
+        last = ticker.get('lastTrade') or {}
+        price = last.get('p')
+        if not price:
+            return None
+        # lastTrade timestamps are nanoseconds.
+        ts_ns = last.get('t') or 0
+        return {
+            'symbol': symbol,
+            'price': price,
+            'open': (ticker.get('day') or {}).get('o', 0),
+            'high': (ticker.get('day') or {}).get('h', 0),
+            'low': (ticker.get('day') or {}).get('l', 0),
+            'volume': (ticker.get('day') or {}).get('v', 0),
+            'timestamp': int(ts_ns / 1_000_000) if ts_ns else 0,
+            'source': 'snapshot',
+            'stale': False,
+        }
+
+    def _quote_from_minute_agg(self, symbol: str) -> Optional[Dict]:
+        """Most recent minute bar from the last two calendar days."""
+        today = datetime.now(trading_guards.EASTERN).date()
+        start = today - timedelta(days=4)
+        data = self._get_json(
+            f"https://api.polygon.io/v2/aggs/ticker/{symbol}/range/1/minute/"
+            f"{start.isoformat()}/{today.isoformat()}",
+            {'adjusted': 'true', 'sort': 'desc', 'limit': 1},
+        )
+        results = (data or {}).get('results') or []
+        if not results:
+            return None
+        bar = results[0]
+        return {
+            'symbol': symbol,
+            'price': bar.get('c', 0),
+            'open': bar.get('o', 0),
+            'high': bar.get('h', 0),
+            'low': bar.get('l', 0),
+            'volume': bar.get('v', 0),
+            'timestamp': bar.get('t', 0),
+            'source': 'minute_agg',
+            'stale': False,
+        }
+
+    def _quote_from_prev_close(self, symbol: str) -> Optional[Dict]:
+        """Previous session's daily bar. Usable as a mark, never as a fill."""
+        data = self._get_json(
+            f"https://api.polygon.io/v2/aggs/ticker/{symbol}/prev",
+            {'adjusted': 'true'},
+        )
+        results = (data or {}).get('results') or []
+        if not results:
+            return None
+        bar = results[0]
+        return {
+            'symbol': symbol,
+            'price': bar.get('c', 0),
+            'open': bar.get('o', 0),
+            'high': bar.get('h', 0),
+            'low': bar.get('l', 0),
+            'volume': bar.get('v', 0),
+            'timestamp': bar.get('t', 0),
+            'source': 'prev_close',
+            'stale': True,
+        }
 
     def place_order(self, symbol: str, side: str, quantity: int,
                    order_type: str = 'market', price: float = None) -> Dict:
@@ -202,10 +289,26 @@ class PaperTradingBot:
             if not quote:
                 return {'status': 'error', 'message': f'Could not get quote for {symbol}'}
 
-            # Refuse to fill off a stale bar. get_quote uses the /prev endpoint
-            # -- the previous session's close -- so without this an order at any
-            # wall-clock time "fills" at yesterday's price, which is precisely
-            # how the 16:50 orders succeeded (falcon-trader#23).
+            # Refuse to fill off a stale bar.
+            #
+            # get_quote prefers the snapshot / latest minute bar and falls back
+            # to the previous close, which it marks stale. A stale quote is a
+            # usable *mark* but never a fill price -- filling from it is how the
+            # 16:50 orders succeeded at the prior session's close
+            # (falcon-trader#23).
+            if quote.get('stale') and os.getenv('FALCON_ALLOW_STALE_FILLS') != '1':
+                msg = (
+                    f"Only a stale {quote.get('source', 'unknown')} quote is "
+                    f"available for {symbol}; refusing to fill"
+                )
+                print(f"[BOT] Rejected {side} {quantity} {symbol}: {msg}")
+                return {
+                    'status': 'error',
+                    'reason': 'stale_price',
+                    'message': msg,
+                    'quoteSource': quote.get('source'),
+                }
+
             bar_ts = quote.get('timestamp')
             if bar_ts and os.getenv('FALCON_ALLOW_STALE_FILLS') != '1':
                 bar_dt = datetime.fromtimestamp(
@@ -233,6 +336,30 @@ class PaperTradingBot:
                         'status': 'error',
                         'message': f'Insufficient funds. Need ${total_cost:,.2f}, have ${account["cash"]:,.2f}'
                     }
+
+            # Churn + risk gates on BUYs. These live here, not only in
+            # base_engine.execute_buy, because strategy_executor reaches the
+            # book through place_order_with_strategy -> place_order and so had
+            # no cooldown at all (falcon-trader#24), and risk_limits was
+            # imported by nothing but its own tests (#26).
+            if side == 'buy':
+                if not self.kill_switch.is_trading_enabled():
+                    reason = self.kill_switch.reason() or 'trading halted'
+                    print(f"[BOT] Rejected {side} {quantity} {symbol}: {reason}")
+                    return {'status': 'error', 'reason': 'trading_halted',
+                            'message': reason}
+
+                state = load_symbol_state(self.db, symbol)
+                cooled = trading_guards.check_cooldown(
+                    symbol, self.cooldown_policy,
+                    last_exit_at=state.last_exit_at,
+                    loss_streak=state.loss_streak,
+                    round_trips_today=state.round_trips_today,
+                )
+                if not cooled.allowed:
+                    print(f"[BOT] Rejected {side} {quantity} {symbol}: {cooled.message}")
+                    return {'status': 'error', 'reason': cooled.reason,
+                            'message': cooled.message}
 
             # Validate the sell BEFORE touching anything.
             #
@@ -371,15 +498,21 @@ class PaperTradingBot:
 
         if amount < 0:
             required = -amount
-            rows = self.db.execute(
+            # RETURNING, not a row count: DatabaseManager.execute gives
+            # cursor.lastrowid on SQLite and cursor.rowcount on Postgres
+            # (db_manager.py:165), so `rows == 0` silently never fires on
+            # SQLite. A row comes back only if the WHERE matched, which makes
+            # the refusal definitive on both backends and still atomic.
+            row = self.db.execute(
                 """UPDATE account
                       SET cash = cash - %s, last_updated = %s
                     WHERE id = (SELECT id FROM account ORDER BY id LIMIT 1)
-                      AND cash >= %s""",
+                      AND cash >= %s
+                RETURNING cash""",
                 (required, timestamp, required),
+                fetch='one',
             )
-            # Row count semantics vary by driver; re-read to confirm.
-            if rows in (0,):
+            if not row:
                 print(f"[BOT] Cash debit of ${required:,.2f} refused (insufficient funds)")
                 return False
             return True
@@ -393,11 +526,23 @@ class PaperTradingBot:
         return True
 
     def update_market_data(self):
-        """Fetch latest market data for tracked symbols"""
+        """Refresh quotes for the watchlist AND mark every open position.
+
+        The watchlist loop alone is why held symbols outside
+        FALCON_DASHBOARD_SYMBOLS never got a price, so every position reported
+        currentPrice == avgPrice (falcon-trader#21). mark_positions() existed
+        but nothing called it; this is the call site.
+        """
         for symbol in self.symbols:
             quote = self.get_quote(symbol)
             if quote:
                 self.market_data[symbol] = quote
+
+        try:
+            self.mark_positions()
+        except Exception as e:
+            # A marking failure must not take down the market-data thread.
+            print(f"[BOT] mark_positions failed: {e}")
 
     def _run_loop(self):
         """Background loop for market data updates"""

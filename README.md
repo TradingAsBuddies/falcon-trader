@@ -86,7 +86,7 @@ Built-in strategies:
 |---|---|---|
 | `FALCON_ALLOW_DEPLOY` | `0` | Enables `POST /api/strategy/deploy`, which writes caller-supplied Python into the installed package and executes it. Leave off unless you are deliberately deploying a strategy. |
 | `FALCON_DAS_LIVE` | *(unset)* | `1` sends real broker orders through DAS. |
-| `FALCON_TRADING_ENABLED` | `1` | Kill switch. `0` halts every trading loop. Also honored: the halt file at `FALCON_HALT_FILE` (default `/var/lib/falcon/TRADING_HALTED`) — `touch` it to stop trading from any shell. |
+| `FALCON_TRADING_ENABLED` | `1` | Kill switch, honoured by `place_order`. `0` halts entries. Also honored: the halt file at `FALCON_HALT_FILE` (default `/var/lib/falcon/TRADING_HALTED`) — `touch` it to stop trading from any shell. |
 | `FALCON_ALLOW_EXTENDED_HOURS` | `0` | `1` permits fills outside 09:30–16:00 ET. |
 | `FALCON_ALLOW_STALE_FILLS` | `0` | `1` permits fills priced off a bar that is not from the current session. |
 

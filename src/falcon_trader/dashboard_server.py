@@ -200,9 +200,18 @@ def _initial_balance(account):
                 return float(value)
             except (TypeError, ValueError):
                 pass
-    row = db.execute(
-        "SELECT initial_balance FROM account ORDER BY id LIMIT 1", fetch='one',
-    )
+    # falcon-core's account table is (id, cash, last_updated) -- there is no
+    # initial_balance column, so this query raises on both SQLite and Postgres
+    # until a core migration adds one. Guarded rather than assumed: an
+    # unguarded SELECT here 500s /api/account, which is worse than falling back
+    # to the configured default.
+    try:
+        row = db.execute(
+            "SELECT initial_balance FROM account ORDER BY id LIMIT 1",
+            fetch='one',
+        )
+    except Exception:
+        row = None
     if row and row.get('initial_balance') is not None:
         return float(row['initial_balance'])
     return float(os.getenv('FALCON_INITIAL_BALANCE', '10000'))

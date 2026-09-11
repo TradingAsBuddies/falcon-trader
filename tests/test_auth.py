@@ -292,6 +292,33 @@ def test_code_execution_endpoints_still_need_a_credential(path):
     assert d.status == 401
 
 
+@pytest.mark.parametrize("path", [
+    "/api/strategies/youtube/7/activate",
+    "/api/strategies/youtube/123/activate/",
+    "//api/strategies/youtube/7/activate",
+])
+def test_youtube_activate_needs_the_deploy_flag(path):
+    """Activate runs LLM-generated strategy code through run_backtest -- the
+    same exec_module path as deploy -- and was behind authentication only."""
+    d = call(method="POST", path=path, authorization=f"Bearer {TOKEN}")
+    assert d.allowed is False
+    assert d.reason == "deploy_disabled"
+
+
+def test_youtube_activate_allowed_with_opt_in():
+    d = decide(config=cfg(allow_deploy=True), method="POST",
+               path="/api/strategies/youtube/7/activate",
+               authorization=f"Bearer {TOKEN}")
+    assert d.allowed is True
+
+
+def test_other_youtube_routes_are_not_gated_as_code_execution():
+    """Listing and submitting are not code execution; only activate is."""
+    d = call(method="GET", path="/api/youtube-strategies",
+             authorization=f"Bearer {TOKEN}")
+    assert d.allowed is True
+
+
 def test_backtest_is_in_the_code_execution_set():
     assert "/api/strategy/backtest" in CODE_EXECUTION_PATHS
     assert "/api/strategy/rollback" in CODE_EXECUTION_PATHS
