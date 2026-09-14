@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Falcon — Market Overview</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #e4e4e4;
+        }
+        .container { max-width: 1100px; margin: 0 auto; padding: 2rem; }
+
+        header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding-bottom: 1.5rem;
+            border-bottom: 1px solid #333;
+            margin-bottom: 1.5rem;
+        }
+        header h1 { font-size: 1.8rem; color: #00d4ff; }
+        .header-right { display: flex; align-items: center; gap: 1rem; }
+        .back-link { color: #888; text-decoration: none; font-size: 0.9rem; }
+        .back-link:hover { color: #00d4ff; }
+        .timestamp { font-size: 0.8rem; color: #666; }
+        .refresh-btn {
+            background: #00d4ff; color: #1a1a2e; border: none;
+            padding: 0.4rem 1rem; border-radius: 6px; font-weight: 600;
+            cursor: pointer; font-size: 0.85rem;
+        }
+        .refresh-btn:hover { background: #00b8e6; }
+        .refresh-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        /* Indicator cards */
+        .indicators {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+        .indicator-card {
+            background: rgba(255,255,255,0.05);
+            border-radius: 10px;
+            padding: 1.2rem;
+            border: 1px solid #333;
+        }
+        .indicator-card .label { font-size: 0.8rem; color: #888; text-transform: uppercase; letter-spacing: 0.05em; }
+        .indicator-card .price { font-size: 1.8rem; font-weight: 700; color: #fff; margin: 0.3rem 0; }
+        .indicator-card .change { font-size: 1rem; font-weight: 600; }
+        .indicator-card .range { font-size: 0.8rem; color: #666; margin-top: 0.3rem; }
+        .indicator-card .vol { font-size: 0.75rem; color: #555; }
+        .up { color: #6bcb77; }
+        .down { color: #ff6b6b; }
+        .flat { color: #888; }
+
+        /* Gainers / Losers */
+        .movers {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+        }
+        @media (max-width: 700px) { .movers { grid-template-columns: 1fr; } }
+
+        .mover-panel {
+            background: rgba(255,255,255,0.04);
+            border-radius: 10px;
+            padding: 1.2rem;
+            border: 1px solid #333;
+        }
+        .mover-panel h2 {
+            font-size: 1rem;
+            color: #00d4ff;
+            margin-bottom: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 0.5rem 0.6rem; text-align: left; border-bottom: 1px solid #2a2a3e; font-size: 0.85rem; }
+        th { color: #666; font-weight: 600; font-size: 0.75rem; text-transform: uppercase; }
+        td.sym { font-weight: 700; }
+        td.sym a { color: #00d4ff; }
+        td.price-col { color: #ccc; }
+        td.vol-col { color: #666; font-size: 0.8rem; }
+
+        /* News section */
+        .news-panel {
+            background: rgba(255,255,255,0.04);
+            border-radius: 10px;
+            padding: 1.2rem;
+            border: 1px solid #333;
+            margin-top: 1.5rem;
+        }
+        .news-panel h2 {
+            font-size: 1rem;
+            color: #00d4ff;
+            margin-bottom: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .news-list { list-style: none; }
+        .news-item {
+            padding: 0.6rem 0;
+            border-bottom: 1px solid #2a2a3e;
+        }
+        .news-item:last-child { border-bottom: none; }
+        .news-item a {
+            color: #e4e4e4;
+            text-decoration: none;
+            font-size: 0.9rem;
+            line-height: 1.4;
+        }
+        .news-item a:hover { color: #00d4ff; }
+        /* Trending tickers */
+        .trending-panel {
+            background: rgba(255,255,255,0.04);
+            border-radius: 10px;
+            padding: 1.2rem;
+            border: 1px solid #333;
+            margin-top: 1.5rem;
+        }
+        .trending-panel h2 {
+            font-size: 1rem;
+            color: #00d4ff;
+            margin-bottom: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .trending-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.6rem;
+        }
+        .trending-chip {
+            background: rgba(0,212,255,0.1);
+            border: 1px solid rgba(0,212,255,0.3);
+            border-radius: 6px;
+            padding: 0.4rem 0.8rem;
+            cursor: pointer;
+            position: relative;
+        }
+        .trending-chip .ticker-name {
+            color: #00d4ff;
+            font-weight: 700;
+            font-size: 0.9rem;
+        }
+        .trending-chip .mention-count {
+            color: #888;
+            font-size: 0.75rem;
+            margin-left: 0.3rem;
+        }
+        .trending-chip .chip-headline {
+            display: none;
+            position: absolute;
+            bottom: 100%;
+            left: 0;
+            background: #1a1a2e;
+            border: 1px solid #444;
+            border-radius: 6px;
+            padding: 0.5rem 0.7rem;
+            font-size: 0.8rem;
+            color: #ccc;
+            width: 280px;
+            z-index: 10;
+            margin-bottom: 0.3rem;
+            line-height: 1.3;
+        }
+        .trending-chip:hover .chip-headline { display: block; }
+        .trending-chip.new-entry {
+            animation: pulse 2s ease-in-out 3;
+            border-color: #ffd93d;
+        }
+
+        /* Alert banner */
+        .alerts {
+            margin-bottom: 1rem;
+        }
+        .alert {
+            background: rgba(255,217,61,0.12);
+            border: 1px solid rgba(255,217,61,0.4);
+            border-radius: 8px;
+            padding: 0.6rem 1rem;
+            margin-bottom: 0.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            animation: slideIn 0.3s ease-out;
+        }
+        .alert .alert-icon { font-size: 1.1rem; }
+        .alert .alert-text { font-size: 0.85rem; color: #e4e4e4; flex: 1; }
+        .alert .alert-ticker { color: #00d4ff; font-weight: 700; }
+        .alert .alert-time { font-size: 0.75rem; color: #666; white-space: nowrap; }
+        .alert .alert-dismiss {
+            background: transparent; border: none; color: #666;
+            cursor: pointer; font-size: 1rem; padding: 0 0.3rem;
+        }
+        .alert .alert-dismiss:hover { color: #fff; }
+
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes pulse {
+            0%, 100% { border-color: rgba(255,217,61,0.4); }
+            50% { border-color: #ffd93d; box-shadow: 0 0 8px rgba(255,217,61,0.3); }
+        }
+
+        /* Auto-refresh indicator */
+        .refresh-status {
+            font-size: 0.75rem;
+            color: #555;
+        }
+        .refresh-status .dot {
+            display: inline-block;
+            width: 6px; height: 6px;
+            border-radius: 50%;
+            background: #6bcb77;
+            margin-right: 4px;
+        }
+        .refresh-status .dot.paused { background: #888; }
+
+        .news-meta {
+            font-size: 0.75rem;
+            color: #555;
+            margin-top: 0.2rem;
+        }
+
+        .loading { text-align: center; padding: 3rem; color: #00d4ff; }
+        .spinner {
+            display: inline-block; width: 1.5rem; height: 1.5rem;
+            border: 2px solid #333; border-top-color: #00d4ff;
+            border-radius: 50%; animation: spin 0.8s linear infinite;
+            margin-bottom: 0.5rem;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Market Overview</h1>
+            <div class="header-right">
+                <span class="refresh-status" id="refresh-status"><span class="dot"></span>Auto 60s</span>
+                <span class="timestamp" id="ts"></span>
+                <button class="refresh-btn" id="btn" onclick="load()">Refresh</button>
+                <a href="/" class="back-link">Home</a>
+            </div>
+        </header>
+
+        <div class="alerts" id="alerts"></div>
+
+        <div id="content">
+            <div class="loading"><div class="spinner"></div><div>Loading market data...</div></div>
+        </div>
+    </div>
+
+    <script>
+        function fmt(n) { return n ? n.toLocaleString() : '0'; }
+        function pct(n) { return n >= 0 ? '+' + n.toFixed(2) + '%' : n.toFixed(2) + '%'; }
+        function cls(n) { return n > 0 ? 'up' : n < 0 ? 'down' : 'flat'; }
+
+        // State tracking for new-entry alerts
+        let prevGainers = new Set();
+        let prevLosers = new Set();
+        let prevTrending = new Set();
+        let isFirstLoad = true;
+
+        const MARKET_REFRESH_MS = 60 * 1000;   // 60 seconds
+        const NEWS_REFRESH_MS = 5 * 60 * 1000; // 5 minutes
+        const MAX_ALERTS = 8;
+        let marketTimer = null;
+        let newsTimer = null;
+
+        function addAlert(ticker, listName, headline) {
+            const container = document.getElementById('alerts');
+            if (!container) return;
+            // Cap alerts
+            while (container.children.length >= MAX_ALERTS) {
+                container.removeChild(container.lastChild);
+            }
+            const time = new Date().toLocaleTimeString();
+            const el = document.createElement('div');
+            el.className = 'alert';
+            el.innerHTML = `
+                <span class="alert-icon">&#9733;</span>
+                <span class="alert-text"><a href="/quote/${ticker}" target="_blank" rel="noopener" class="alert-ticker" style="text-decoration:none">$${ticker}</a> appeared in <strong>${listName}</strong>${headline ? ' — ' + headline : ''}</span>
+                <span class="alert-time">${time}</span>
+                <button class="alert-dismiss" onclick="this.parentElement.remove()">&times;</button>
+            `;
+            container.insertBefore(el, container.firstChild);
+        }
+
+        function detectNewEntries(gainers, losers) {
+            if (isFirstLoad) return;
+
+            const curGainers = new Set((gainers || []).map(g => g.symbol));
+            const curLosers = new Set((losers || []).map(l => l.symbol));
+
+            for (const sym of curGainers) {
+                if (!prevGainers.has(sym)) {
+                    const item = gainers.find(g => g.symbol === sym);
+                    addAlert(sym, 'Top Gainers', item ? pct(item.change_pct) : '');
+                }
+            }
+            for (const sym of curLosers) {
+                if (!prevLosers.has(sym)) {
+                    const item = losers.find(l => l.symbol === sym);
+                    addAlert(sym, 'Top Losers', item ? pct(item.change_pct) : '');
+                }
+            }
+
+            prevGainers = curGainers;
+            prevLosers = curLosers;
+        }
+
+        function detectNewTrending(trending) {
+            if (isFirstLoad || !trending) return new Set();
+
+            const curTrending = new Set(trending.map(t => t.ticker));
+            const newTickers = new Set();
+
+            for (const t of trending) {
+                if (!prevTrending.has(t.ticker)) {
+                    addAlert(t.ticker, 'In The News', t.headline.substring(0, 60));
+                    newTickers.add(t.ticker);
+                }
+            }
+
+            prevTrending = curTrending;
+            return newTickers;
+        }
+
+        function tickerLink(sym, text) {
+            return `<a href="/quote/${sym}" target="_blank" rel="noopener" style="color:#00d4ff;text-decoration:underline;text-underline-offset:2px;cursor:pointer">${text || sym}</a>`;
+        }
+
+        function renderIndicators(indicators) {
+            const order = ['SPY', 'TQQQ', 'VIXY', 'BNO'];
+            return '<div class="indicators">' + order.map(sym => {
+                const d = indicators[sym];
+                if (!d) return '';
+                const diff = d.current - d.prev_close;
+                const absDiff = Math.abs(diff);
+                let color;
+                if (absDiff < 1.0) {
+                    color = 'flat';
+                } else if (diff > 0) {
+                    color = 'up';
+                } else {
+                    color = 'down';
+                }
+                return `
+                    <div class="indicator-card">
+                        <div class="label">${tickerLink(sym, d.label)}</div>
+                        <div class="price ${color}">$${d.current.toFixed(2)}</div>
+                        <div class="change ${color}">${pct(d.change_pct)} (${diff >= 0 ? '+' : ''}${diff.toFixed(2)})</div>
+                        <div class="range" style="color:#666">Prev Close: $${d.prev_close.toFixed(2)}</div>
+                        <div class="range">L $${d.low.toFixed(2)} — H $${d.high.toFixed(2)}</div>
+                        <div class="vol">Vol: ${fmt(d.volume)}</div>
+                    </div>`;
+            }).join('') + '</div>';
+        }
+
+        function renderTable(items, label, changeClass) {
+            if (!items || items.length === 0) return `<div class="mover-panel"><h2>${label}</h2><div style="color:#666;padding:1rem;text-align:center">Unavailable — may require upgraded Polygon plan</div></div>`;
+            const rows = items.map(t => `
+                <tr>
+                    <td class="sym">${tickerLink(t.symbol)}</td>
+                    <td class="price-col">$${t.price ? t.price.toFixed(2) : '—'}</td>
+                    <td class="${changeClass}">${pct(t.change_pct)}</td>
+                    <td class="vol-col">${fmt(t.volume)}</td>
+                </tr>
+            `).join('');
+            return `
+                <div class="mover-panel">
+                    <h2>${label}</h2>
+                    <table>
+                        <thead><tr><th>Symbol</th><th>Price</th><th>Change</th><th>Volume</th></tr></thead>
+                        <tbody>${rows}</tbody>
+                    </table>
+                </div>`;
+        }
+
+        async function load() {
+            const btn = document.getElementById('btn');
+            btn.disabled = true; btn.textContent = 'Loading...';
+
+            try {
+                const resp = await fetch('/api/market');
+                const data = await resp.json();
+
+                if (data.error) {
+                    document.getElementById('content').innerHTML = `<div class="loading" style="color:#ff6b6b">${data.error}</div>`;
+                    return;
+                }
+
+                const ts = new Date(data.timestamp);
+                document.getElementById('ts').textContent = ts.toLocaleTimeString() + ' ET';
+
+                // Detect new entries in gainers/losers before rendering
+                detectNewEntries(data.gainers, data.losers);
+
+                document.getElementById('content').innerHTML =
+                    renderIndicators(data.indicators) +
+                    '<div class="movers">' +
+                        renderTable(data.gainers, 'Top Gainers', 'up') +
+                        renderTable(data.losers, 'Top Losers', 'down') +
+                    '</div>' +
+                    '<div class="trending-panel" id="trending-panel"><h2>In The News</h2><div style="color:#666">Loading...</div></div>' +
+                    '<div class="news-panel" id="news-panel"><h2>Breaking News</h2><div style="color:#666">Loading news...</div></div>';
+
+                if (isFirstLoad) {
+                    // Seed initial state (no alerts on first load)
+                    prevGainers = new Set((data.gainers || []).map(g => g.symbol));
+                    prevLosers = new Set((data.losers || []).map(l => l.symbol));
+                    isFirstLoad = false;
+                }
+
+                // Always reload news after market data renders
+                // (market refresh replaces the DOM, so news panels need repopulating)
+                loadNews();
+            } catch (err) {
+                document.getElementById('content').innerHTML = `<div class="loading" style="color:#ff6b6b">Error: ${err.message}</div>`;
+            }
+
+            btn.disabled = false; btn.textContent = 'Refresh';
+        }
+
+        async function loadNews() {
+            try {
+                const resp = await fetch('/api/market/news');
+                const data = await resp.json();
+                const panel = document.getElementById('news-panel');
+                if (!panel) return;
+
+                if (!data.articles || data.articles.length === 0) {
+                    panel.innerHTML = '<h2>Breaking News</h2><div style="color:#666;padding:1rem">No news available</div>';
+                    return;
+                }
+
+                const items = data.articles.map(a => {
+                    const ago = timeAgo(a.pubDate);
+                    const tickers = (a.tickers && a.tickers.length) ? a.tickers.slice(0, 5).map(t => `<a href="/quote/${t}" target="_blank" rel="noopener" style="color:#00d4ff;text-decoration:none">$${t}</a>`).join(' ') + ' ' : '';
+                    const src = a.source ? `<span style="color:#555">${a.source}</span>` : '';
+                    return `
+                        <li class="news-item">
+                            <a href="${a.link}" target="_blank" rel="noopener">${a.title}</a>
+                            <div class="news-meta">${tickers}${src} &middot; ${ago}</div>
+                        </li>`;
+                }).join('');
+
+                panel.innerHTML = `<h2>Breaking News</h2><ul class="news-list">${items}</ul>`;
+
+                // Detect new trending tickers
+                const newTickers = detectNewTrending(data.trending);
+
+                // Render trending tickers
+                const trendingPanel = document.getElementById('trending-panel');
+                if (trendingPanel && data.trending && data.trending.length > 0) {
+                    const chips = data.trending.map(t => {
+                        const isNew = newTickers.has(t.ticker) ? ' new-entry' : '';
+                        return `
+                            <div class="trending-chip${isNew}">
+                                <a href="/quote/${t.ticker}" target="_blank" rel="noopener" style="text-decoration:none">
+                                    <span class="ticker-name">$${t.ticker}</span>
+                                </a>
+                                <span class="mention-count">${t.mentions}x</span>
+                                <div class="chip-headline">${t.headline}</div>
+                            </div>`;
+                    }).join('');
+                    trendingPanel.innerHTML = `<h2>In The News</h2><div class="trending-list">${chips}</div>`;
+                } else if (trendingPanel) {
+                    trendingPanel.innerHTML = '';
+                }
+
+                // Seed trending state on first load
+                if (prevTrending.size === 0 && data.trending) {
+                    prevTrending = new Set(data.trending.map(t => t.ticker));
+                }
+            } catch (err) {
+                const panel = document.getElementById('news-panel');
+                if (panel) panel.innerHTML = '<h2>Breaking News</h2><div style="color:#ff6b6b">Failed to load news</div>';
+            }
+        }
+
+        function timeAgo(dateStr) {
+            if (!dateStr) return '';
+            const date = new Date(dateStr);
+            const now = new Date();
+            const mins = Math.floor((now - date) / 60000);
+            if (mins < 1) return 'just now';
+            if (mins < 60) return mins + 'm ago';
+            const hrs = Math.floor(mins / 60);
+            if (hrs < 24) return hrs + 'h ago';
+            const days = Math.floor(hrs / 24);
+            return days + 'd ago';
+        }
+
+        // Initial load
+        load();
+
+        // Auto-refresh: market data every 60s, news every 5m
+        marketTimer = setInterval(() => {
+            load();
+        }, MARKET_REFRESH_MS);
+
+        newsTimer = setInterval(() => {
+            loadNews();
+        }, NEWS_REFRESH_MS);
+
+        // Refresh news on the first cycle too (after initial market load)
+        setTimeout(() => loadNews(), MARKET_REFRESH_MS);
+    </script>
+</body>
+</html>
