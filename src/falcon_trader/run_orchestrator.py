@@ -156,13 +156,35 @@ def main():
     print(f"Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print_separator()
 
-    # Load configuration
+    # Load configuration.
+    #
+    # This used to be the bare relative path 'orchestrator/orchestrator_config.yaml',
+    # which resolves against the current working directory. In the container the
+    # working directory is /app and the file installs into the package, so the
+    # orchestrator exited 1 on every start. It only ever worked when something
+    # happened to be run from src/falcon_trader.
+    #
+    # Resolution order: an explicit override, then a file relative to the working
+    # directory (so an operator-supplied config still wins), then the copy that
+    # ships with the package.
     print("\n[INIT] Loading configuration...")
-    config_file = 'orchestrator/orchestrator_config.yaml'
+    _packaged = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        'orchestrator', 'orchestrator_config.yaml',
+    )
+    _cwd_relative = os.path.join('orchestrator', 'orchestrator_config.yaml')
+
+    config_file = os.environ.get('FALCON_ORCHESTRATOR_CONFIG') or (
+        _cwd_relative if os.path.exists(_cwd_relative) else _packaged
+    )
 
     if not os.path.exists(config_file):
         print(f"[ERROR] Configuration file not found: {config_file}")
+        print(f"[HINT]  Set FALCON_ORCHESTRATOR_CONFIG, or reinstall the package "
+              f"(expected at {_packaged})")
         sys.exit(1)
+
+    print(f"[OK] Using config: {config_file}")
 
     with open(config_file, 'r') as f:
         config = yaml.safe_load(f)
