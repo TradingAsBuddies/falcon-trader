@@ -64,10 +64,53 @@ Built-in strategies:
 
 ## Configuration
 
-Environment variables:
-- `MASSIVE_API_KEY` - Polygon.io API key
-- `DB_TYPE` - Database type
-- `DB_PATH` - Database path
+### Required
+
+| Variable | Purpose |
+|---|---|
+| `FALCON_API_TOKEN` | **Required.** Shared secret for the dashboard. The server refuses to start without it. Generate with `python3 -c "import secrets; print(secrets.token_urlsafe(32))"`. Minimum 24 characters. |
+| `MASSIVE_API_KEY` | Polygon.io API key. Also accepted as `POLYGON_API_KEY`. **No longer accepted as a command-line argument** — a key on `argv` is visible in `ps` to every user on the host. |
+
+### Network surface
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `FALCON_BIND_HOST` | `127.0.0.1` | Listen address. Set to `0.0.0.0` **only** inside a container where Traefik and its auth middleware are the boundary. |
+| `FALCON_BIND_PORT` | `5000` | Listen port. |
+| `FALCON_CORS_ORIGINS` | *(unset)* | Comma-separated allowed origins. Unset means no cross-origin access is granted at all. The dashboard is same-origin and does not need this. |
+| `FALCON_COOKIE_SECURE` | `0` | Set to `1` when served over HTTPS so the session cookie is HTTPS-only. |
+
+### Dangerous operations — off by default
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `FALCON_ALLOW_DEPLOY` | `0` | Enables `POST /api/strategy/deploy`, which writes caller-supplied Python into the installed package and executes it. Leave off unless you are deliberately deploying a strategy. |
+| `FALCON_DAS_LIVE` | *(unset)* | `1` sends real broker orders through DAS. |
+| `FALCON_TRADING_ENABLED` | `1` | Kill switch, honoured by `place_order`. `0` halts entries. Also honored: the halt file at `FALCON_HALT_FILE` (default `/var/lib/falcon/TRADING_HALTED`) — `touch` it to stop trading from any shell. |
+| `FALCON_ALLOW_EXTENDED_HOURS` | `0` | `1` permits fills outside 09:30–16:00 ET. |
+| `FALCON_ALLOW_STALE_FILLS` | `0` | `1` permits fills priced off a bar that is not from the current session. |
+
+### Other
+
+| Variable | Purpose |
+|---|---|
+| `DB_TYPE` | Database type |
+| `DB_PATH` | Database path |
+| `FALCON_INITIAL_BALANCE` | Fallback starting balance when the account row has none. |
+| `FALCON_DASHBOARD_SYMBOLS` | Watchlist for the market-data thread. Does **not** limit which positions get marked. |
+
+### Authenticating
+
+Browsers sign in at `/login` and receive an HttpOnly `SameSite=Strict` session
+cookie; the existing dashboard pages then work unchanged. Scripts send the token
+as a header:
+
+```bash
+curl -H "Authorization: Bearer $FALCON_API_TOKEN" http://localhost:5000/api/account
+```
+
+`/health` is the only unauthenticated endpoint, so container and gateway health
+checks keep working.
 
 ## License
 

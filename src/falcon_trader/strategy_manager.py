@@ -14,6 +14,7 @@ import os
 import sys
 import ast
 import subprocess
+import re
 import tempfile
 import shutil
 from datetime import datetime
@@ -192,8 +193,29 @@ class StrategyManager:
 
         return all_passed, results
 
+    #: Tickers are 1-5 letters, optionally with a class suffix (BRK.B).
+    _TICKER_RE = re.compile(r"^[A-Z]{1,5}(?:[.-][A-Z]{1,2})?$")
+
     def run_backtest(self, code: str, ticker: str = "SPY", days: int = 365) -> Tuple[bool, Dict]:
-        """Run a backtest on the strategy and return results"""
+        """Run a backtest on the strategy and return results.
+
+        `ticker` and `days` are interpolated into generated Python source
+        below. `days` was unquoted, so a caller could pass
+        ``"0);__import__('os').system('id');("`` and execute code without even
+        supplying a strategy (falcon-trader#25). Both are validated here rather
+        than trusted; the caller is not necessarily a person.
+        """
+        ticker = str(ticker).strip().upper()
+        if not self._TICKER_RE.match(ticker):
+            return False, {"error": f"Invalid ticker: {ticker!r}"}
+
+        try:
+            days = int(days)
+        except (TypeError, ValueError):
+            return False, {"error": f"'days' must be an integer, got {days!r}"}
+        if not 1 <= days <= 3650:
+            return False, {"error": f"'days' must be between 1 and 3650, got {days}"}
+
         # Write strategy to temp file
         with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
             f.write(code)
