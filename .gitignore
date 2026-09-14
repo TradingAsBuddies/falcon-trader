@@ -21,3 +21,7 @@ build/
 
 # OS
 .DS_Store
+
+# Strategy code must NEVER be committed — lives in DB and private falcon-strategies repo
+src/falcon_trader/strategies/
+!src/falcon_trader/strategies/__init__.py
