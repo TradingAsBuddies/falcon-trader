@@ -7,9 +7,12 @@ import json
 import threading
 import time
 from datetime import datetime
+import xml.etree.ElementTree as ElementTree
 from falcon_core import get_db_manager, FalconConfig
+from falcon_core.http import http_get
 
 from falcon_trader import auth, portfolio
+from falcon_trader.orchestrator.utils.timezone import now_et
 
 # Optional YouTube strategy support
 try:
@@ -290,6 +293,326 @@ def get_positions():
         positions_list.append(entry)
 
     return jsonify(positions_list)
+
+@app.route('/api/market')
+def api_market():
+    """Current market indicators, top gainers, and top losers"""
+
+    api_key = os.environ.get('MASSIVE_API_KEY', '') or os.environ.get('POLYGON_API_KEY', '')
+    if not api_key:
+        return jsonify({"error": "No Polygon API key"}), 503
+
+    # Key market indicators — prev close as red-to-green line + current price
+    indicators = {}
+    today = now_et().strftime('%Y-%m-%d')
+    for symbol, label in [('SPY', 'S&P 500'), ('TQQQ', 'TQQQ'), ('VIXY', 'VIX (VIXY)'), ('BNO', 'Brent Crude (BNO)')]:
+        try:
+            # Yesterday's close (the red-to-green line)
+            prev_resp = http_get(
+                f"https://api.polygon.io/v2/aggs/ticker/{symbol}/prev",
+                params={'adjusted': 'true', 'apiKey': api_key}, timeout=5,
+            )
+            if prev_resp is None:
+                continue
+            prev_data = prev_resp.json()
+            if not prev_data.get('results'):
+                continue
+            prev = prev_data['results'][0]
+            prev_close = prev.get('c', 0)
+
+            # Current price from latest minute bar
+            cur_resp = http_get(
+                f"https://api.polygon.io/v2/aggs/ticker/{symbol}/range/1/minute/{today}/{today}",
+                params={'adjusted': 'true', 'sort': 'desc', 'limit': 1, 'apiKey': api_key},
+                timeout=5,
+            )
+            if cur_resp is None:
+                continue
+            cur_data = cur_resp.json()
+            cur_results = cur_data.get('results', [])
+
+            if cur_results:
+                current_price = cur_results[0].get('c', prev_close)
+                current_volume = cur_results[0].get('v', 0)
+                today_high = cur_results[0].get('h', current_price)
+                today_low = cur_results[0].get('l', current_price)
+            else:
+                # Market may be closed — use prev close as current
+                current_price = prev_close
+                current_volume = prev.get('v', 0)
+                today_high = prev.get('h', prev_close)
+                today_low = prev.get('l', prev_close)
+
+            change = current_price - prev_close
+            change_pct = (change / prev_close * 100) if prev_close else 0
+
+            indicators[symbol] = {
+                'label': label,
+                'current': current_price,
+                'prev_close': prev_close,
+                'change': round(change, 2),
+                'change_pct': round(change_pct, 2),
+                'high': today_high,
+                'low': today_low,
+                'volume': current_volume,
+            }
+        except Exception:
+            pass
+
+    # Top gainers and losers from Polygon snapshot
+    gainers = []
+    losers = []
+    try:
+        url = "https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/gainers"
+        resp = http_get(url, params={'apiKey': api_key}, timeout=10)
+        if resp and resp.status_code == 200:
+            for t in resp.json().get('tickers', [])[:10]:
+                day = t.get('todaysChangePerc', t.get('day', {}))
+                gainers.append({
+                    'symbol': t.get('ticker', ''),
+                    'price': t.get('day', {}).get('c', t.get('lastTrade', {}).get('p', 0)),
+                    'change_pct': round(t.get('todaysChangePerc', 0), 2),
+                    'volume': t.get('day', {}).get('v', 0),
+                })
+    except Exception:
+        pass
+
+    try:
+        url = "https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/losers"
+        resp = http_get(url, params={'apiKey': api_key}, timeout=10)
+        if resp and resp.status_code == 200:
+            for t in resp.json().get('tickers', [])[:10]:
+                losers.append({
+                    'symbol': t.get('ticker', ''),
+                    'price': t.get('day', {}).get('c', t.get('lastTrade', {}).get('p', 0)),
+                    'change_pct': round(t.get('todaysChangePerc', 0), 2),
+                    'volume': t.get('day', {}).get('v', 0),
+                })
+    except Exception:
+        pass
+
+    return jsonify({
+        'indicators': indicators,
+        'gainers': gainers,
+        'losers': losers,
+        'timestamp': now_et().isoformat(),
+    })
+
+
+@app.route('/api/market/news')
+def api_market_news():
+    """Fetch market news from Polygon.io, Finviz Elite, and Yahoo Finance RSS"""
+
+    api_key = os.environ.get('MASSIVE_API_KEY', '') or os.environ.get('POLYGON_API_KEY', '')
+    articles = []
+    seen_titles = set()
+
+    # 1. Polygon.io news (primary — higher quality, ticker-tagged)
+    app.logger.debug(f"[NEWS] api_key={bool(api_key)}, finviz_key={bool(os.environ.get('FINVIZ_AUTH_KEY', ''))}")
+    if api_key:
+        # General market news + key tickers
+        for ticker_param in [None, 'SPY']:
+            try:
+                params = {'limit': 10, 'order': 'desc', 'apiKey': api_key}
+                if ticker_param:
+                    params['ticker'] = ticker_param
+                resp = http_get(
+                    'https://api.polygon.io/v2/reference/news',
+                    params=params, timeout=10,
+                )
+                if resp and resp.status_code == 200:
+                    for r in resp.json().get('results', []):
+                        title = r.get('title', '')
+                        if title in seen_titles:
+                            continue
+                        seen_titles.add(title)
+                        articles.append({
+                            'title': title,
+                            'link': r.get('article_url', ''),
+                            'pubDate': r.get('published_utc', ''),
+                            'source': r.get('publisher', {}).get('name', 'Polygon'),
+                            'tickers': r.get('tickers', []),
+                        })
+            except Exception as e:
+                app.logger.debug(f"[NEWS] Polygon error ({ticker_param}): {e}")
+                continue
+
+    app.logger.debug(f"[NEWS] After Polygon: {len(articles)} articles")
+
+    # 2. Finviz Elite news (premium sources — Bloomberg, CNBC, WSJ)
+    finviz_key = os.environ.get('FINVIZ_AUTH_KEY', '')
+    if finviz_key:
+        try:
+            from bs4 import BeautifulSoup
+            resp = http_get(
+                'https://elite.finviz.com/news.ashx',
+                cookies={'finviz_elite': finviz_key},
+                headers={'User-Agent': 'Falcon Trading Platform'},
+                timeout=10,
+            )
+            if resp and resp.status_code == 200:
+                soup = BeautifulSoup(resp.content, 'html.parser')
+                finviz_added = 0
+                for cell in soup.find_all('td', class_='news_link-cell'):
+                    if finviz_added >= 15:
+                        break
+                    link = cell.find('a', href=True)
+                    if not link:
+                        continue
+                    title = link.get_text(strip=True)
+                    if title in seen_titles:
+                        continue
+                    seen_titles.add(title)
+                    url = link['href']
+                    # Extract source from domain
+                    domain = _urlparse(url).netloc.replace('www.', '')
+                    # Get time from sibling cell
+                    time_cell = cell.find_previous_sibling('td', class_='news_date-cell')
+                    time_text = time_cell.get_text(strip=True) if time_cell else ''
+                    articles.append({
+                        'title': title,
+                        'link': url,
+                        'pubDate': time_text,
+                        'source': domain,
+                        'tickers': [],
+                    })
+                    finviz_added += 1
+        except Exception as e:
+            app.logger.debug(f"[NEWS] Finviz error: {e}")
+
+    app.logger.debug(f"[NEWS] After Finviz: {len(articles)} articles")
+
+    # 3. CNBC RSS (24/7 coverage — US + international)
+    cnbc_feeds = [
+        ('https://www.cnbc.com/id/100003114/device/rss/rss.html', 'CNBC'),
+        ('https://www.cnbc.com/id/100727362/device/rss/rss.html', 'CNBC World'),
+    ]
+    for feed_url, source in cnbc_feeds:
+        try:
+            resp = http_get(feed_url, timeout=10, headers={'User-Agent': 'Falcon Trading Platform'})
+            if not resp or resp.status_code != 200:
+                continue
+            root = ElementTree.fromstring(resp.content)
+            for item in root.findall('.//item'):
+                title = item.findtext('title', '')
+                if title in seen_titles:
+                    continue
+                seen_titles.add(title)
+                articles.append({
+                    'title': title,
+                    'link': item.findtext('link', ''),
+                    'pubDate': item.findtext('pubDate', ''),
+                    'source': source,
+                    'tickers': [],
+                })
+        except Exception:
+            continue
+
+    # 4. Yahoo Finance RSS (US markets + global indices + commodities)
+    yahoo_feeds = [
+        ('https://feeds.finance.yahoo.com/rss/2.0/headline?s=SPY&region=US&lang=en-US', 'Yahoo Finance'),
+        ('https://feeds.finance.yahoo.com/rss/2.0/headline?s=^GSPC&region=US&lang=en-US', 'Yahoo Finance'),
+        ('https://feeds.finance.yahoo.com/rss/2.0/headline?s=^N225,^HSI,^FTSE&region=US&lang=en-US', 'Yahoo Global'),
+        ('https://feeds.finance.yahoo.com/rss/2.0/headline?s=CL=F,GC=F&region=US&lang=en-US', 'Yahoo Commodities'),
+    ]
+    for feed_url, source in yahoo_feeds:
+        try:
+            resp = http_get(feed_url, timeout=10, headers={'User-Agent': 'Falcon Trading Platform'})
+            if not resp or resp.status_code != 200:
+                continue
+            root = ElementTree.fromstring(resp.content)
+            for item in root.findall('.//item'):
+                title = item.findtext('title', '')
+                if title in seen_titles:
+                    continue
+                seen_titles.add(title)
+                articles.append({
+                    'title': title,
+                    'link': item.findtext('link', ''),
+                    'pubDate': item.findtext('pubDate', ''),
+                    'source': source,
+                    'tickers': [],
+                })
+        except Exception:
+            continue
+
+    # Normalize all dates to ISO for consistent sorting.
+    from email.utils import parsedate_to_datetime
+    def to_iso(pd):
+        if not pd:
+            return ''
+        # RFC 2822 (Yahoo): "Wed, 25 Mar 2026 22:10:21 +0000" — check first since it contains 'T' in day names
+        if ',' in pd and len(pd) > 20:
+            try:
+                return parsedate_to_datetime(pd).isoformat()
+            except Exception:
+                return pd
+        # ISO 8601 (Polygon): "2026-03-25T22:00:00Z"
+        if 'T' in pd and len(pd) > 10:
+            return pd
+        # Time only (Finviz): "06:21PM" — treat as today
+        if ('AM' in pd or 'PM' in pd) and len(pd) < 10:
+            try:
+                from datetime import datetime as _dt
+                t = _dt.strptime(pd.strip(), '%I:%M%p')
+                today = now_et().date()
+                return _dt.combine(today, t.time()).isoformat()
+            except Exception:
+                return ''
+        return pd
+
+    for a in articles:
+        a['pubDate'] = to_iso(a.get('pubDate', ''))
+
+    articles.sort(key=lambda a: a.get('pubDate', ''), reverse=True)
+    articles = articles[:30]
+
+    # Build trending tickers from Polygon tags + title extraction
+    import re
+    _TICKER_RE = re.compile(r'\b([A-Z]{1,5})\b')
+    _COMMON_WORDS = {
+        'THE', 'FOR', 'AND', 'ARE', 'BUT', 'NOT', 'YOU', 'ALL', 'CAN', 'HER',
+        'WAS', 'ONE', 'OUR', 'OUT', 'HAS', 'HIS', 'HOW', 'ITS', 'MAY', 'NEW',
+        'NOW', 'OLD', 'SEE', 'WAY', 'WHO', 'DID', 'GET', 'LET', 'SAY', 'SHE',
+        'TOO', 'USE', 'CEO', 'IPO', 'ETF', 'GDP', 'FED', 'SEC', 'FBI', 'DOJ',
+        'USD', 'OIL', 'WAR', 'BUY', 'TOP', 'BIG', 'LOW', 'HIGH', 'DOWN', 'RISE',
+        'FALL', 'BEST', 'SELL', 'YEAR', 'IRAN', 'ASIA', 'AMID', 'SAYS', 'JUST',
+        'MORE', 'THAN', 'THIS', 'WITH', 'FROM', 'THAT', 'BEEN', 'HAVE', 'WILL',
+        'WHAT', 'WHEN', 'YOUR', 'EACH', 'MAKE', 'LIKE', 'LONG', 'LOOK', 'MANY',
+        'SOME', 'THEM', 'THEN', 'VERY', 'OVER', 'SUCH', 'TAKE', 'INTO', 'MOST',
+        'HERE', 'NEAR', 'WEEK', 'LAST', 'NEXT', 'DOES', 'NYSE', 'LIVE', 'ALSO',
+        'BACK', 'KEEP', 'EVEN', 'STILL', 'COULD', 'WOULD', 'AFTER', 'THREE',
+        'THESE', 'FIRST', 'WHERE', 'EVERY', 'BEING', 'ABOUT', 'TRUMP', 'STOCK',
+        'RALLY', 'SURGE', 'EARLY', 'TRADE', 'INDEX',
+    }
+    ticker_mentions = {}
+    for a in articles:
+        tickers = a.get('tickers', [])
+        if not tickers:
+            # Extract potential tickers from title (1-5 uppercase letters)
+            candidates = _TICKER_RE.findall(a.get('title', ''))
+            tickers = [t for t in candidates if t not in _COMMON_WORDS and len(t) >= 2]
+            a['tickers'] = tickers
+        for t in tickers:
+            if t not in ticker_mentions:
+                ticker_mentions[t] = {'count': 0, 'latest_title': ''}
+            ticker_mentions[t]['count'] += 1
+            if not ticker_mentions[t]['latest_title']:
+                ticker_mentions[t]['latest_title'] = a.get('title', '')
+
+    # Sort by mention count, take top 10
+    trending = sorted(ticker_mentions.items(), key=lambda x: -x[1]['count'])[:10]
+    trending_list = [
+        {'ticker': t, 'mentions': info['count'], 'headline': info['latest_title']}
+        for t, info in trending
+    ]
+
+    return jsonify({
+        'articles': articles,
+        'trending': trending_list,
+        'timestamp': now_et().isoformat(),
+    })
+
 
 @app.route('/api/order', methods=['POST'])
 def place_order():
@@ -1852,6 +2175,12 @@ def get_trade_distribution():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route('/market')
+def serve_market():
+    """Serve the market overview dashboard"""
+    return send_file('www/market.html')
 
 
 @app.route('/analytics')
