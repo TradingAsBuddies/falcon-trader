@@ -12,6 +12,7 @@ from falcon_core import get_db_manager, FalconConfig
 from falcon_core.http import http_get
 
 from falcon_trader import auth, portfolio
+from falcon_trader.market_movers import build_movers
 from falcon_trader.orchestrator.utils.timezone import now_et
 
 # Optional YouTube strategy support
@@ -359,37 +360,19 @@ def api_market():
         except Exception:
             pass
 
-    # Top gainers and losers from Polygon snapshot
-    gainers = []
-    losers = []
-    try:
-        url = "https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/gainers"
-        resp = http_get(url, params={'apiKey': api_key}, timeout=10)
-        if resp and resp.status_code == 200:
-            for t in resp.json().get('tickers', [])[:10]:
-                day = t.get('todaysChangePerc', t.get('day', {}))
-                gainers.append({
-                    'symbol': t.get('ticker', ''),
-                    'price': t.get('day', {}).get('c', t.get('lastTrade', {}).get('p', 0)),
-                    'change_pct': round(t.get('todaysChangePerc', 0), 2),
-                    'volume': t.get('day', {}).get('v', 0),
-                })
-    except Exception:
-        pass
-
-    try:
-        url = "https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/losers"
-        resp = http_get(url, params={'apiKey': api_key}, timeout=10)
-        if resp and resp.status_code == 200:
-            for t in resp.json().get('tickers', [])[:10]:
-                losers.append({
-                    'symbol': t.get('ticker', ''),
-                    'price': t.get('day', {}).get('c', t.get('lastTrade', {}).get('p', 0)),
-                    'change_pct': round(t.get('todaysChangePerc', 0), 2),
-                    'volume': t.get('day', {}).get('v', 0),
-                })
-    except Exception:
-        pass
+    # Top gainers and losers from the Polygon snapshot. Price/volume
+    # resolution and the warrant/right filter live in market_movers so they
+    # can be tested without Flask or the network.
+    movers = {'gainers': [], 'losers': []}
+    for direction in movers:
+        try:
+            url = f"https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/{direction}"
+            resp = http_get(url, params={'apiKey': api_key}, timeout=10)
+            if resp and resp.status_code == 200:
+                movers[direction] = build_movers(resp.json().get('tickers', []))
+        except Exception:
+            logging.getLogger(__name__).exception("Could not load %s snapshot", direction)
+    gainers, losers = movers['gainers'], movers['losers']
 
     return jsonify({
         'indicators': indicators,
