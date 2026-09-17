@@ -161,6 +161,22 @@ class KillSwitch:
             and not self._file_halted()
         )
 
+    def status(self) -> dict:
+        """Each halt source separately, for display.
+
+        is_trading_enabled() collapses three sources into one bool, which is
+        right for enforcement and useless for an operator asking *why*. This
+        reports them apart, without changing any of them.
+        """
+        return {
+            "trading_enabled": self.is_trading_enabled(),
+            "reason": self.reason(),
+            "env_enabled": self._env_enabled(),
+            "halt_file": str(self.halt_file),
+            "halt_file_present": self._file_halted(),
+            "in_process_halt": self._in_process_halt,
+        }
+
     def reason(self) -> Optional[str]:
         if self._in_process_halt is not None:
             return self._in_process_halt

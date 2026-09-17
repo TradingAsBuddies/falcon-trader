@@ -154,6 +154,24 @@
             </div>
         </div>
 
+        <!-- Risk Controls (read-only) -->
+        <div class="panel full" id="riskPanel" style="margin-bottom:16px;">
+            <h2>Risk Controls
+                <span id="riskKill" style="float:right;font-size:13px;padding:3px 10px;border-radius:12px;background:#3e3d32;color:#75715e;">kill switch: …</span>
+            </h2>
+            <div id="riskReach" style="display:none;margin:8px 0;padding:8px 10px;border-radius:6px;background:#3a2f12;color:#e6db74;font-size:13px;"></div>
+            <div id="riskScope" style="font-size:13px;color:#75715e;margin:6px 0 10px;"></div>
+            <table id="riskSymbols">
+                <thead><tr><th>Symbol</th><th>Held</th><th>New entry</th><th>Loss streak</th><th>Round trips today</th><th>Last exit</th></tr></thead>
+                <tbody><tr><td colspan="6" style="text-align:center;color:#75715e;">Loading…</td></tr></tbody>
+            </table>
+            <div id="riskPolicy" style="font-size:12px;color:#75715e;margin-top:8px;"></div>
+            <details style="margin-top:10px;">
+                <summary style="cursor:pointer;color:#f92672;font-size:13px;">Pre-trade limits — defined but NOT enforced</summary>
+                <div id="riskUnenforced" style="font-size:12px;color:#75715e;margin-top:6px;"></div>
+            </details>
+        </div>
+
         <!-- Account Stats -->
         <div class="stats-grid">
             <div class="stat-card">
@@ -475,6 +493,85 @@
         loadRecommendations();
         loadDasStatus();
         loadBotStatus();
+        loadRiskStatus();
+
+
+        // ── Risk Controls (read-only) ────────────────────────────────────
+        function esc(v) {
+            return String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        }
+        function fmtDuration(sec) {
+            if (typeof sec !== 'number') return '?';
+            if (sec % 86400 === 0) return (sec / 86400) + 'd';
+            if (sec % 3600 === 0) return (sec / 3600) + 'h';
+            return Math.round(sec / 60) + 'm';
+        }
+        async function loadRiskStatus() {
+            const kill = document.getElementById('riskKill');
+            const tbody = document.querySelector('#riskSymbols tbody');
+            try {
+                const response = await fetch('/api/risk/status');
+                const d = await response.json();
+                if (!response.ok || !d.kill_switch) throw new Error(d.error || `HTTP ${response.status}`);
+
+                const ks = d.kill_switch;
+                if (ks.trading_enabled) {
+                    kill.textContent = 'kill switch: TRADING ENABLED';
+                    kill.style.background = '#4d5a1f'; kill.style.color = '#a6e22e';
+                } else {
+                    kill.textContent = 'kill switch: HALTED';
+                    kill.style.background = '#8a1538'; kill.style.color = '#f8f8f2';
+                }
+                kill.title = ks.reason || 'all halt sources clear';
+
+                const reach = document.getElementById('riskReach');
+                if (ks.reach_warning) {
+                    reach.style.display = 'block';
+                    reach.textContent = '⚠ ' + ks.reach_warning;
+                } else {
+                    reach.style.display = 'none';
+                }
+
+                const paths = xs => (xs || []).map(x => esc(x.path)).join(', ') || 'none';
+                document.getElementById('riskScope').innerHTML =
+                    `Kill switch checked on: <b style="color:#f8f8f2;">${paths(d.enforced_on)}</b>` +
+                    ` · never blocks: ${paths(d.never_blocked)}` +
+                    ` · not reachable from here: ${paths(d.not_reachable)}`;
+
+                const rows = d.symbols || [];
+                tbody.innerHTML = rows.length === 0
+                    ? '<tr><td colspan="6" style="text-align:center;color:#75715e;">No held or recently traded symbols</td></tr>'
+                    : rows.map(r => `<tr>
+                        <td class="ticker">${esc(r.symbol)}</td>
+                        <td>${r.held ? 'yes' : ''}</td>
+                        <td class="${r.entry_allowed ? 'positive' : 'negative'}" title="${esc(r.block_message)}">
+                            ${r.entry_allowed ? 'allowed' : 'blocked — ' + esc(r.block_reason)}</td>
+                        <td>${esc(r.loss_streak)}</td>
+                        <td>${esc(r.round_trips_today)}</td>
+                        <td>${r.last_exit_at ? esc(r.last_exit_at.replace('T', ' ').slice(0, 16)) : '—'}</td>
+                    </tr>`).join('');
+
+                const p = d.cooldown_policy || {};
+                document.getElementById('riskPolicy').textContent =
+                    `Enforced churn policy: cooldown ${fmtDuration(p.cooldown_seconds)} after an exit · ` +
+                    `lockout ${fmtDuration(p.lockout_seconds)} after ${p.max_loss_streak} straight losses · ` +
+                    `${p.max_round_trips_per_day} round trip(s) per symbol per day`;
+
+                const u = d.pre_trade_limits || {};
+                const lim = u.limits || {};
+                document.getElementById('riskUnenforced').innerHTML =
+                    `<p style="margin:0 0 6px;">${esc(u.note)}</p>` +
+                    Object.entries(lim).map(([k, v]) =>
+                        `<span style="display:inline-block;margin:0 12px 4px 0;">${esc(k)}: <s>${esc(Array.isArray(v) ? (v.join(',') || 'none') : v)}</s></span>`
+                    ).join('');
+            } catch (e) {
+                console.error('Error loading risk status:', e);
+                kill.textContent = 'kill switch: UNKNOWN';
+                kill.style.background = '#3e3d32'; kill.style.color = '#e6db74';
+                kill.title = 'Risk status unavailable: ' + e.message;
+                tbody.innerHTML = '<tr><td colspan="6" style="color:#f92672;">Risk status unavailable — do not assume trading is halted</td></tr>';
+            }
+        }
 
         // Auto-refresh every 30 seconds
         setInterval(() => {
@@ -483,6 +580,7 @@
             loadTrades();
             loadDasStatus();
             loadBotStatus();
+            loadRiskStatus();
         }, 30000);
     </script>
 </body>
