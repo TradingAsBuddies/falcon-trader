@@ -14,6 +14,7 @@ from typing import Optional, Dict, List
 from dataclasses import dataclass
 
 from falcon_core import DatabaseManager
+from falcon_trader.risk_limits import KillSwitch
 from falcon_trader.symbol_state import load_symbol_state
 from falcon_trader.trading_guards import CooldownPolicy, check_cooldown
 from falcon_trader.orchestrator.utils.data_structures import Position
@@ -84,6 +85,12 @@ class BaseStrategyEngine:
         # Per-symbol churn limits, driven from the orchestrator config
         # (falcon-trader#24). Thresholds live in config, not in the code.
         self.cooldown_policy = CooldownPolicy.from_config(config.get('cooldown'))
+
+        # The same kill switch the paper bot honors. Until now it guarded only
+        # PaperTradingBot.place_order -- the dashboard's order ticket -- while
+        # this engine, which places every automated entry, ignored it. So a
+        # halt stopped manual orders and let the orchestrator keep buying.
+        self.kill_switch = KillSwitch()
 
     def get_position(self, symbol: str) -> Optional[Position]:
         """
@@ -175,6 +182,18 @@ class BaseStrategyEngine:
             ExecutionResult with trade details
         """
         try:
+            # Kill switch first: a halt means no new risk, whatever the churn
+            # state. Buys only -- execute_sell is deliberately not gated, since a
+            # halt that also blocked exits would trap the book in open positions.
+            if not self.kill_switch.is_trading_enabled():
+                reason = self.kill_switch.reason() or "trading halted"
+                print(f"  [HALTED] {symbol}: {reason}")
+                return ExecutionResult(
+                    success=False,
+                    symbol=symbol,
+                    error=f"trading_halted: {reason}",
+                )
+
             # Churn gate (falcon-trader#24). The only prior check was for a
             # *simultaneous* duplicate position below -- once a position closed,
             # the symbol was re-eligible on the very next cycle, which is how
