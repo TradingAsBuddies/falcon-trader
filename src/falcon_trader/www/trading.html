@@ -154,12 +154,19 @@
             </div>
         </div>
 
-        <!-- Risk Controls (read-only) -->
+        <!-- Risk Controls -->
         <div class="panel full" id="riskPanel" style="margin-bottom:16px;">
             <h2>Risk Controls
                 <span id="riskKill" style="float:right;font-size:13px;padding:3px 10px;border-radius:12px;background:#3e3d32;color:#75715e;">kill switch: …</span>
             </h2>
             <div id="riskReach" style="display:none;margin:8px 0;padding:8px 10px;border-radius:6px;background:#3a2f12;color:#e6db74;font-size:13px;"></div>
+            <div id="riskHaltNote" style="display:none;margin:8px 0;padding:8px 10px;border-radius:6px;background:#4a1325;color:#f8f8f2;font-size:13px;"></div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0;">
+                <input id="haltReason" maxlength="200" placeholder="reason for halting (required)" style="flex:1;min-width:200px;background:#1b1d1e;color:#f8f8f2;border:1px solid #3e3d32;border-radius:6px;padding:7px;">
+                <button id="haltBtn" onclick="haltTrading()" style="background:#f92672;color:#f8f8f2;border:none;padding:7px 14px;border-radius:6px;cursor:pointer;font-weight:600;">Halt new entries</button>
+                <button id="resumeBtn" onclick="resumeTrading()" style="display:none;background:#3e3d32;color:#a6e22e;border:1px solid #a6e22e;padding:7px 14px;border-radius:6px;cursor:pointer;font-weight:600;">Resume</button>
+                <span id="haltResult" style="color:#75715e;font-size:13px;"></span>
+            </div>
             <div id="riskScope" style="font-size:13px;color:#75715e;margin:6px 0 10px;"></div>
             <table id="riskSymbols">
                 <thead><tr><th>Symbol</th><th>Held</th><th>New entry</th><th>Loss streak</th><th>Round trips today</th><th>Last exit</th></tr></thead>
@@ -496,7 +503,7 @@
         loadRiskStatus();
 
 
-        // ── Risk Controls (read-only) ────────────────────────────────────
+        // ── Risk Controls ────────────────────────────────────────────────
         function esc(v) {
             return String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
         }
@@ -523,6 +530,19 @@
                     kill.style.background = '#8a1538'; kill.style.color = '#f8f8f2';
                 }
                 kill.title = ks.reason || 'all halt sources clear';
+
+                const note = document.getElementById('riskHaltNote');
+                const hn = ks.halt_note;
+                if (hn) {
+                    note.style.display = 'block';
+                    note.textContent = hn.unreadable
+                        ? 'Halt file present but unreadable: ' + hn.unreadable
+                        : `Halted${hn.halted_at ? ' at ' + hn.halted_at.replace('T', ' ').slice(0, 19) : ''}` +
+                          ` — ${hn.reason || 'no reason recorded'}${hn.source ? ' (' + hn.source + ')' : ''}`;
+                } else {
+                    note.style.display = 'none';
+                }
+                document.getElementById('resumeBtn').style.display = ks.halt_file_present ? 'inline-block' : 'none';
 
                 const reach = document.getElementById('riskReach');
                 if (ks.reach_warning) {
@@ -571,6 +591,46 @@
                 kill.title = 'Risk status unavailable: ' + e.message;
                 tbody.innerHTML = '<tr><td colspan="6" style="color:#f92672;">Risk status unavailable — do not assume trading is halted</td></tr>';
             }
+        }
+
+        function showKillResult(d, ok) {
+            const out = document.getElementById('haltResult');
+            const ks = d.kill_switch || {};
+            let msg = d.error || d.status;
+            if (ok && ks.reach_warning) msg += ' — but ' + ks.reach_warning;
+            out.textContent = msg;
+            out.style.color = ok && !ks.reach_warning ? '#a6e22e' : '#f92672';
+        }
+        async function haltTrading() {
+            const reason = document.getElementById('haltReason').value.trim();
+            if (!reason) { showKillResult({error: 'A reason is required to halt.'}, false); return; }
+            if (!confirm('Halt all NEW entries (dashboard orders and orchestrator buys)?\n\nExits and sells are never blocked.')) return;
+            try {
+                const r = await fetch('/api/risk/halt', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({reason})
+                });
+                const d = await r.json();
+                showKillResult(d, r.ok);
+                if (r.ok) document.getElementById('haltReason').value = '';
+            } catch (e) {
+                showKillResult({error: 'Halt request failed: ' + e.message + ' — trading may NOT be halted'}, false);
+            }
+            loadRiskStatus();
+        }
+        async function resumeTrading() {
+            if (!confirm('Remove the halt and allow new entries again?')) return;
+            try {
+                const r = await fetch('/api/risk/resume', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({confirm: 'resume'})
+                });
+                const d = await r.json();
+                showKillResult(d, r.ok && d.status !== 'still_halted');
+            } catch (e) {
+                showKillResult({error: 'Resume request failed: ' + e.message}, false);
+            }
+            loadRiskStatus();
         }
 
         // Auto-refresh every 30 seconds
