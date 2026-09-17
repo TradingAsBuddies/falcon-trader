@@ -210,3 +210,56 @@ def test_engine_constructs_a_kill_switch():
     src = open(__import__("falcon_trader.orchestrator.engines.base_engine",
                           fromlist=["x"]).__file__).read()
     assert "self.kill_switch = KillSwitch()" in src
+
+
+# ── held_and_recent_symbols (the logic that 500'd in the route) ──────────
+
+class _FakeDB:
+    """Records queries; answers the two the helper makes."""
+
+    def __init__(self, held, recent):
+        self._held, self._recent = held, recent
+        self.calls = []
+
+    def execute(self, query, params=None, fetch=None):
+        self.calls.append((query, params, fetch))
+        if "FROM positions" in query:
+            return [{"symbol": s} for s in self._held]
+        if "FROM orders" in query:
+            return [{"symbol": s} for s in self._recent]
+        raise AssertionError(f"unexpected query: {query}")
+
+
+def test_symbols_union_of_held_and_recent_sorted():
+    """Regression for the production 500.
+
+    This logic first lived inline in the /api/risk/status route and referenced
+    `_dt`, which that module never defined at module scope. No test touched the
+    route, so the suite was green while the endpoint returned 500.
+    """
+    db = _FakeDB(held=["MSFT", "AAPL"], recent=["TSLA", "AAPL"])
+    held, symbols = risk_status.held_and_recent_symbols(db, now=NOW)
+    assert held == ["MSFT", "AAPL"]
+    assert symbols == ["AAPL", "MSFT", "TSLA"]
+
+
+def test_cutoff_is_bound_as_a_parameter_not_backend_sql():
+    """`now() - interval '7 days'` is PostgreSQL-only (FAL-11)."""
+    db = _FakeDB(held=[], recent=[])
+    risk_status.held_and_recent_symbols(db, now=NOW, days=7)
+    orders_query, params, _ = db.calls[1]
+    assert "interval" not in orders_query.lower() and "now()" not in orders_query.lower()
+    assert params == (NOW - dt.timedelta(days=7),)
+
+
+def test_empty_book_returns_empty_lists():
+    db = _FakeDB(held=[], recent=[])
+    assert risk_status.held_and_recent_symbols(db, now=NOW) == ([], [])
+
+
+def test_null_db_results_are_tolerated():
+    class _NoneDB(_FakeDB):
+        def execute(self, *a, **k):
+            super().execute(*a, **k)
+            return None
+    assert risk_status.held_and_recent_symbols(_NoneDB([], []), now=NOW) == ([], [])

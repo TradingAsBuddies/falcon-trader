@@ -16,6 +16,7 @@ That means reporting three things a naive status page would get wrong:
 """
 
 import datetime as _dt
+from datetime import datetime, timedelta
 from pathlib import PurePosixPath
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -137,6 +138,29 @@ def symbol_rows(states: Iterable[Any], policy: CooldownPolicy,
         })
     rows.sort(key=lambda r: (r["entry_allowed"], not r["held"], r["symbol"]))
     return rows
+
+
+def held_and_recent_symbols(db, now: Optional[datetime] = None,
+                            days: int = 7) -> "tuple[list, list]":
+    """Held symbols, and those plus anything traded in the last `days` days.
+
+    Lives here rather than in the Flask route so it is tested. It was first
+    written inline in the route, referencing a name the route's module did not
+    define at module scope -- /api/risk/status returned 500 in production while
+    every test passed, because no test touched the adapter.
+
+    The cutoff is computed in Python and bound as a parameter: `now() -
+    interval '7 days'` is PostgreSQL-only (FAL-11), and DatabaseManager.execute
+    rewrites %s for SQLite.
+    """
+    now = now or datetime.now()
+    held = [r['symbol'] for r in (db.execute(
+        "SELECT symbol FROM positions WHERE quantity > 0", fetch='all') or [])]
+    cutoff = now - timedelta(days=days)
+    recent = {r['symbol'] for r in (db.execute(
+        "SELECT DISTINCT symbol FROM orders WHERE timestamp > %s",
+        (cutoff,), fetch='all') or [])}
+    return held, sorted(set(held) | recent)
 
 
 def build_status(kill_switch_status: Dict[str, Any], mountinfo: str,

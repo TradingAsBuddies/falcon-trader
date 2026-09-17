@@ -8,6 +8,7 @@ import threading
 import time
 from datetime import datetime
 import xml.etree.ElementTree as ElementTree
+from urllib.parse import urlparse as _urlparse
 from falcon_core import get_db_manager, FalconConfig
 from falcon_core.http import http_get
 
@@ -240,20 +241,7 @@ def get_risk_status():
     except OSError:
         mountinfo = ""
 
-    held_rows = db.execute(
-        "SELECT symbol FROM positions WHERE quantity > 0", fetch='all',
-    ) or []
-    held = [r['symbol'] for r in held_rows]
-
-    # Portable cutoff: computed here and passed as a parameter rather than
-    # `now() - interval '7 days'`, which is PostgreSQL-only (FAL-11).
-    cutoff = datetime.now() - _dt.timedelta(days=7)
-    recent_rows = db.execute(
-        "SELECT DISTINCT symbol FROM orders WHERE timestamp > %s",
-        (cutoff,), fetch='all',
-    ) or []
-
-    symbols = sorted(set(held) | {r['symbol'] for r in recent_rows})
+    held, symbols = risk_status.held_and_recent_symbols(db)
     states = [load_symbol_state(db, sym) for sym in symbols]
 
     return jsonify(risk_status.build_status(
