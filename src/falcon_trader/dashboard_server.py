@@ -227,7 +227,13 @@ def get_account():
     if not bot:
         return jsonify({"error": "Bot not initialized"}), 503
 
-    account = bot.get_account()
+    # Read the account row directly. bot.get_account() quoted every open
+    # position one at a time to compute a total_value this endpoint then
+    # discarded -- only `cash` was used -- so /api/account paid for every
+    # quote twice and took ~10s on a ten-position book. The row also carries
+    # initial_balance, which bot.get_account()'s dict never did, so
+    # _initial_balance could not read it even once the column is populated.
+    account = db.execute("SELECT * FROM account LIMIT 1", fetch='one') or {'cash': 0.0}
     positions, prices = _held_positions_and_prices()
 
     realized = db.execute(

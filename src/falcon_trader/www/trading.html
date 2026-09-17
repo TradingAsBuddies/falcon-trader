@@ -251,6 +251,11 @@
             try {
                 const response = await fetch('/api/account');
                 const data = await response.json();
+                // A failed request used to leave every figure silently blank,
+                // which reads as "no data" rather than "request failed".
+                if (!response.ok || typeof data.totalValue !== 'number') {
+                    throw new Error(data.error || `HTTP ${response.status}`);
+                }
 
                 document.getElementById('totalValue').textContent = `$${data.totalValue.toFixed(2)}`;
                 document.getElementById('cash').textContent = `$${data.cash.toFixed(2)}`;
@@ -268,6 +273,10 @@
                 pctEl.className = `value ${pnlPct >= 0 ? 'positive' : 'negative'}`;
             } catch (e) {
                 console.error('Error loading account:', e);
+                for (const id of ['totalValue', 'cash', 'positionsValue', 'totalPnL', 'returnPct']) {
+                    const el = document.getElementById(id);
+                    if (el) { el.textContent = '—'; el.title = 'Account unavailable: ' + e.message; }
+                }
             }
         }
 
@@ -286,18 +295,26 @@
 
                 let html = '';
                 positions.forEach(p => {
-                    const value = p.quantity * p.currentPrice;
+                    // currentPrice is null when no quote could be obtained
+                    // (pre-market, halts): the API marks the position stale
+                    // rather than inventing a price. Calling toFixed on null
+                    // threw and replaced the whole table with an error, so
+                    // one unquoted symbol hid every position.
+                    const priced = typeof p.currentPrice === 'number';
                     const cost = p.quantity * p.avgPrice;
-                    const pnl = value - cost;
-                    const pnlClass = pnl >= 0 ? 'positive' : 'negative';
+                    const value = priced ? p.quantity * p.currentPrice : null;
+                    const pnl = priced ? value - cost : null;
+                    const pnlClass = pnl === null ? '' : (pnl >= 0 ? 'positive' : 'negative');
+                    const stale = p.stale ? ` <span title="stale mark (${p.markSource || 'none'})" style="color:#e6db74;">●</span>` : '';
+                    const na = '<span title="no current quote" style="color:#75715e;">—</span>';
 
                     html += `<tr>
-                        <td class="ticker">${p.symbol}</td>
+                        <td class="ticker">${p.symbol}${stale}</td>
                         <td>${p.quantity}</td>
                         <td>$${p.avgPrice.toFixed(2)}</td>
-                        <td>$${p.currentPrice.toFixed(2)}</td>
-                        <td>$${value.toFixed(2)}</td>
-                        <td class="${pnlClass}">$${pnl.toFixed(2)}</td>
+                        <td>${priced ? '$' + p.currentPrice.toFixed(2) : na}</td>
+                        <td>${priced ? '$' + value.toFixed(2) : na}</td>
+                        <td class="${pnlClass}">${pnl === null ? na : '$' + pnl.toFixed(2)}</td>
                     </tr>`;
                 });
 

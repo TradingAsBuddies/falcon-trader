@@ -4,6 +4,7 @@ Falcon Paper Trading Bot
 Real-time paper trading with Polygon.io market data
 """
 
+from concurrent.futures import ThreadPoolExecutor
 import os
 import time
 import requests
@@ -21,6 +22,10 @@ try:
 except Exception:
     falcon_config = None
 
+
+
+# Concurrent quote requests when marking a book to market.
+QUOTE_WORKERS = 8
 
 class PaperTradingBot:
     """
@@ -670,13 +675,25 @@ class PaperTradingBot:
         """
         wanted = list(self.symbols if symbols is None else symbols)
         prices = {}
+        to_quote = []
         for symbol in wanted:
             if symbol in self.market_data:
                 prices[symbol] = self.market_data[symbol]['price']
-                continue
-            quote = self.get_quote(symbol)
-            if quote and quote.get('price'):
-                prices[symbol] = quote['price']
+            else:
+                to_quote.append(symbol)
+
+        # Quote concurrently. get_quote falls back through up to three
+        # endpoints per symbol and was called one symbol at a time, so a
+        # ten-position book took ~5s here -- the dashboard polls this every
+        # 30s and showed blank panels while it waited. get_quote holds no
+        # shared state, so running it in parallel changes latency, not which
+        # price is chosen. Bounded so a large book does not burst the API.
+        if to_quote:
+            workers = min(QUOTE_WORKERS, len(to_quote))
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                for symbol, quote in zip(to_quote, pool.map(self.get_quote, to_quote)):
+                    if quote and quote.get('price'):
+                        prices[symbol] = quote['price']
         return prices
 
     def get_position_symbols(self):
