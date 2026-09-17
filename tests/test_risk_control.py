@@ -5,6 +5,7 @@ nothing exercised the route. These tests go through a Flask test client, and
 the last group installs the real auth gate in front of the blueprint.
 """
 
+import datetime as dt
 from types import SimpleNamespace
 
 import pytest
@@ -12,6 +13,7 @@ import pytest
 flask = pytest.importorskip("flask")
 
 from falcon_trader import auth, risk_control
+from falcon_trader.orchestrator.utils.timezone import ET
 from falcon_trader.risk_limits import KillSwitch
 from falcon_trader.trading_guards import CooldownPolicy
 
@@ -78,42 +80,77 @@ def test_reason_length_is_bounded():
 
 def test_write_halt_is_honored_by_a_separate_kill_switch(halt_file):
     """The whole point: another process's KillSwitch sees it."""
-    assert risk_control.write_halt(halt_file, "manual", actor="10.0.0.5") is True
+    assert risk_control.write_halt(halt_file, "manual") is True
     other_process = KillSwitch(halt_file=halt_file, env={})
     assert other_process.is_trading_enabled() is False
 
 
 def test_second_halt_keeps_the_first_reason(halt_file):
-    risk_control.write_halt(halt_file, "first", actor="a")
-    assert risk_control.write_halt(halt_file, "second", actor="b") is False
+    risk_control.write_halt(halt_file, "first")
+    assert risk_control.write_halt(halt_file, "second") is False
     assert risk_control.read_halt_note(halt_file)["reason"] == "first"
 
 
 def test_halt_note_round_trip(halt_file):
-    risk_control.write_halt(halt_file, "daily loss hit", actor="10.0.0.5")
+    risk_control.write_halt(halt_file, "daily loss hit")
     note = risk_control.read_halt_note(halt_file)
     assert note["reason"] == "daily loss hit"
-    assert note["source"] == "source: dashboard (10.0.0.5)"
+    assert note["source"] == "source: dashboard"
     assert note["halted_at"]
+
+
+def test_halt_time_is_eastern_not_container_utc(halt_file):
+    """The regression: the container clock is UTC and the note said 12:37 for 08:37 ET."""
+    utc = dt.datetime(2026, 9, 17, 12, 37, 44, tzinfo=dt.timezone.utc)
+    risk_control.write_halt(halt_file, "x", now=utc.astimezone(ET))
+    note = risk_control.read_halt_note(halt_file)
+    assert note["halted_at"].endswith("-04:00")
+    assert note["halted_at_display"] == "2026-09-17 08:37:44 ET"
+
+
+def test_default_halt_time_carries_an_offset(halt_file):
+    risk_control.write_halt(halt_file, "x")
+    assert dt.datetime.fromisoformat(risk_control.read_halt_note(halt_file)["halted_at"]).tzinfo is not None
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ("2026-09-17T12:37:44+00:00", "2026-09-17 08:37:44 ET"),
+    ("2026-12-01T15:00:00+00:00", "2026-12-01 10:00:00 ET"),   # EST, not EDT
+    ("2026-09-17T12:37:44.966480", "2026-09-17 12:37:44 (timezone not recorded)"),
+    ("not a time", "not a time"),
+    (None, None),
+])
+def test_format_halted_at(raw, expected):
+    """A naive timestamp (KillSwitch.halt, or by hand) is labelled, never assumed ET."""
+    assert risk_control.format_halted_at(raw) == expected
+
+
+def test_note_records_no_client_address(halt_file):
+    """Every request arrives from the podman gateway; an address here would mislead."""
+    app = _app(halt_file)
+    app.test_client().post("/api/risk/halt", json={"reason": "x"},
+                           environ_base={"REMOTE_ADDR": "10.89.0.133"})
+    assert "10.89.0.133" not in halt_file.read_text()
 
 
 def test_halt_note_of_hand_touched_file(halt_file):
     """`touch TRADING_HALTED` from a shell is still a valid halt."""
     halt_file.parent.mkdir(parents=True)
     halt_file.touch()
-    assert risk_control.read_halt_note(halt_file) == {"halted_at": None, "reason": None, "source": None}
+    assert risk_control.read_halt_note(halt_file) == {
+        "halted_at": None, "halted_at_display": None, "reason": None, "source": None}
 
 
 def test_unwritable_directory_raises_instead_of_reporting_success(tmp_path):
     blocker = tmp_path / "control"
     blocker.write_text("a file where the directory should be")
     with pytest.raises(risk_control.HaltWriteError):
-        risk_control.write_halt(blocker / "TRADING_HALTED", "x", actor="a")
+        risk_control.write_halt(blocker / "TRADING_HALTED", "x")
 
 
 def test_remove_halt_reports_presence(halt_file):
     assert risk_control.remove_halt(halt_file) is False
-    risk_control.write_halt(halt_file, "x", actor="a")
+    risk_control.write_halt(halt_file, "x")
     assert risk_control.remove_halt(halt_file) is True
     assert not halt_file.exists()
 
@@ -121,7 +158,7 @@ def test_remove_halt_reports_presence(halt_file):
 # ── routes ──────────────────────────────────────────────────────────────
 
 def test_status_route_returns_200_with_halt_note(halt_file):
-    risk_control.write_halt(halt_file, "why", actor="a")
+    risk_control.write_halt(halt_file, "why")
     resp = _app(halt_file).test_client().get("/api/risk/status")
     assert resp.status_code == 200
     ks = resp.get_json()["kill_switch"]
@@ -175,7 +212,7 @@ def test_halt_route_failure_is_500_not_200(tmp_path):
 
 
 def test_resume_requires_confirmation(halt_file):
-    risk_control.write_halt(halt_file, "x", actor="a")
+    risk_control.write_halt(halt_file, "x")
     client = _app(halt_file).test_client()
     for payload in (None, {}, {"confirm": True}, {"confirm": "yes"}):
         resp = client.post("/api/risk/resume", json=payload)
@@ -184,7 +221,7 @@ def test_resume_requires_confirmation(halt_file):
 
 
 def test_resume_route_resumes(halt_file):
-    risk_control.write_halt(halt_file, "x", actor="a")
+    risk_control.write_halt(halt_file, "x")
     body = _app(halt_file).test_client().post("/api/risk/resume", json={"confirm": "resume"}).get_json()
     assert body["status"] == "resumed"
     assert body["kill_switch"]["trading_enabled"] is True
@@ -198,7 +235,7 @@ def test_resume_when_not_halted(halt_file):
 
 def test_resume_cannot_override_the_env_flag(halt_file):
     """FALCON_TRADING_ENABLED=0 is a deploy-time decision the dashboard cannot undo."""
-    risk_control.write_halt(halt_file, "x", actor="a")
+    risk_control.write_halt(halt_file, "x")
     app = _app(halt_file, env={"FALCON_TRADING_ENABLED": "0"})
     body = app.test_client().post("/api/risk/resume", json={"confirm": "resume"}).get_json()
     assert body["status"] == "still_halted"

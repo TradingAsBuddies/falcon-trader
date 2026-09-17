@@ -537,7 +537,7 @@
                     note.style.display = 'block';
                     note.textContent = hn.unreadable
                         ? 'Halt file present but unreadable: ' + hn.unreadable
-                        : `Halted${hn.halted_at ? ' at ' + hn.halted_at.replace('T', ' ').slice(0, 19) : ''}` +
+                        : `Halted${hn.halted_at_display ? ' at ' + hn.halted_at_display : ''}` +
                           ` — ${hn.reason || 'no reason recorded'}${hn.source ? ' (' + hn.source + ')' : ''}`;
                 } else {
                     note.style.display = 'none';
