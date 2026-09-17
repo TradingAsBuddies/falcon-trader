@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 from falcon_trader import risk_status
+from falcon_trader.orchestrator.utils.timezone import ET, now_et
 
 logger = logging.getLogger(__name__)
 
@@ -59,17 +60,24 @@ def clean_reason(raw: Any) -> str:
     return reason
 
 
-def write_halt(path: Path, reason: str, actor: str,
-               now: Optional[datetime] = None) -> bool:
+def write_halt(path: Path, reason: str, now: Optional[datetime] = None,
+               source: str = "dashboard") -> bool:
     """Create the halt file. True if this call halted, False if already halted.
 
     O_EXCL makes "already halted" atomic: two operators clicking at once cannot
     both believe they wrote the reason. The file is checked afterwards because a
     halt that silently failed to land is the worst outcome this can have.
+
+    The timestamp is Eastern with its offset. The containers run on UTC, and a
+    naive datetime.now() wrote 12:37 for a halt made at 08:37 ET.
+
+    No client address is recorded: behind rootless podman's port forward every
+    request comes from the network gateway, and with one shared API token there
+    is no per-person identity to record. A made-up "who" is worse than none.
     """
     path = Path(path)
-    now = now or datetime.now()
-    body = f"{now.isoformat()}\n{reason}\nsource: dashboard ({actor})\n"
+    now = now or now_et()
+    body = f"{now.isoformat()}\n{reason}\nsource: {source}\n"
     # mkdir is outside the O_EXCL block on purpose: it raises FileExistsError
     # too (when a file sits where the directory should be), and reading that as
     # "already halted" would report a halt that was never written.
@@ -125,11 +133,30 @@ def read_halt_note(path: Path) -> Optional[Dict[str, Any]]:
     except OSError as exc:
         return {"unreadable": str(exc)}
     lines = [ln.strip() for ln in text.splitlines()]
+    halted_at = lines[0] if len(lines) > 0 else None
     return {
-        "halted_at": lines[0] if len(lines) > 0 else None,
+        "halted_at": halted_at,
+        "halted_at_display": format_halted_at(halted_at),
         "reason": lines[1][:MAX_REASON_LENGTH] if len(lines) > 1 else None,
         "source": lines[2][:MAX_REASON_LENGTH] if len(lines) > 2 else None,
     }
+
+
+def format_halted_at(raw: Optional[str]) -> Optional[str]:
+    """The halt time in Eastern, for display. Never presents an unknown zone as ET.
+
+    Halt files written by KillSwitch.halt() or by hand may carry a naive
+    timestamp; those are shown as-is and labelled, not guessed at.
+    """
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError:
+        return raw[:40]
+    if parsed.tzinfo is None:
+        return parsed.strftime("%Y-%m-%d %H:%M:%S") + " (timezone not recorded)"
+    return parsed.astimezone(ET).strftime("%Y-%m-%d %H:%M:%S ET")
 
 
 def read_mountinfo() -> str:
@@ -194,7 +221,7 @@ def create_blueprint(get_bot: Callable[[], Any], get_db: Callable[[], Any],
 
         path = bot.kill_switch.halt_file
         try:
-            halted_now = write_halt(path, reason, actor=request.remote_addr or "unknown")
+            halted_now = write_halt(path, reason)
         except HaltWriteError as exc:
             logger.critical("HALT REQUEST FAILED from %s: %s", request.remote_addr, exc)
             return jsonify({
