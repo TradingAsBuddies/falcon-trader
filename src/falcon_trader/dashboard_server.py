@@ -14,8 +14,7 @@ from falcon_core.http import http_get
 
 from falcon_trader import auth, portfolio
 from falcon_trader.market_movers import build_movers
-from falcon_trader import risk_status
-from falcon_trader.symbol_state import load_symbol_state
+from falcon_trader import risk_control
 from falcon_trader.orchestrator.utils.timezone import now_et
 
 # Optional YouTube strategy support
@@ -120,6 +119,11 @@ bot = None
 # Initialize database manager (uses environment variables for config)
 db = get_db_manager()
 
+# /api/risk/status, /api/risk/halt, /api/risk/resume. Providers are lambdas
+# because `bot` is assigned in main(), after this module is imported.
+app.register_blueprint(risk_control.create_blueprint(
+    get_bot=lambda: bot, get_db=lambda: db))
+
 # --- DB-persisted runtime config (editable from the website via /api/config) ---
 def _config_init():
     """Create the app_config table and load persisted values into RUNTIME_CONFIG."""
@@ -222,35 +226,6 @@ def _initial_balance(account):
     if row and row.get('initial_balance') is not None:
         return float(row['initial_balance'])
     return float(os.getenv('FALCON_INITIAL_BALANCE', '10000'))
-
-
-@app.route('/api/risk/status')
-def get_risk_status():
-    """Which risk controls are in force right now, and how far a halt reaches.
-
-    Read-only. Reports the kill switch source by source, which order paths
-    honor it, whether the halt file is on a shared mount, per-symbol churn
-    state, and the pre-trade limits that are defined but not enforced.
-    """
-    if not bot:
-        return jsonify({"error": "Bot not initialized"}), 503
-
-    try:
-        with open('/proc/self/mountinfo') as fh:
-            mountinfo = fh.read()
-    except OSError:
-        mountinfo = ""
-
-    held, symbols = risk_status.held_and_recent_symbols(db)
-    states = [load_symbol_state(db, sym) for sym in symbols]
-
-    return jsonify(risk_status.build_status(
-        kill_switch_status=bot.kill_switch.status(),
-        mountinfo=mountinfo,
-        policy=bot.cooldown_policy,
-        states=states,
-        held=held,
-    ))
 
 
 @app.route('/api/account')
