@@ -14,7 +14,7 @@ from falcon_core.http import http_get
 
 from falcon_trader import auth, portfolio
 from falcon_trader.market_movers import build_movers
-from falcon_trader import risk_control
+from falcon_trader import recommendation_gate, risk_control
 from falcon_trader.orchestrator.utils.timezone import now_et
 
 # Optional YouTube strategy support
@@ -1178,40 +1178,16 @@ def get_recommendations():
             })
 
         # ---- RECENCY / EXPIRY GATE (falcon-trader #7) -----------------------
-        # Never serve a setup whose validity window has closed (valid_until in
-        # the past) or whose data is flagged STALE as a LIVE, actionable
-        # suggestion. Acting on an expired/stale signal is the exact failure
-        # this gate prevents. Non-actionable setups are still returned under a
-        # separate key (not silently dropped) so the UI can show them as DEAD.
-        from datetime import datetime as _dt
-        try:
-            from zoneinfo import ZoneInfo as _ZI
-            _now_et = _dt.now(_ZI("America/New_York"))
-        except Exception:
-            from datetime import timezone as _tz
-            _now_et = _dt.now(_tz.utc)
-
-        def _is_expired(rec):
-            vu = rec.get('valid_until')
-            if not vu:
-                return False
-            try:
-                end = _dt.fromisoformat(str(vu))
-            except Exception:
-                return False
-            if end.tzinfo is None:
-                return False
-            return _now_et > end
-
-        _top_stale = 'STALE' in str(scan.get('data_recency') or '')
-        for _rec in merged:
-            _exp = _is_expired(_rec)
-            _stale = _top_stale or 'STALE' in str(_rec.get('data_recency') or '')
-            _rec['expired'] = _exp
-            _rec['actionable'] = not (_exp or _stale)
-
-        live = [r for r in merged if r.get('actionable')]
-        expired_recs = [r for r in merged if not r.get('actionable')]
+        # Never serve a setup whose validity window has closed, or whose data
+        # is flagged STALE, as an actionable suggestion. Withheld rows are
+        # returned separately (never silently dropped) with the reason.
+        #
+        # The scan's recency applies only to rows the scan produced: it used to
+        # be applied to every merged row, so before the open -- when the newest
+        # flat file is yesterday's -- fresh screener picks were withheld as
+        # "STALE (EOD flat-file)" with no flat file involved in making them.
+        live, expired_recs = recommendation_gate.mark_actionable(
+            merged, scan.get('data_recency'), now_et())
 
         return jsonify({
             "status": "success",
@@ -1224,9 +1200,7 @@ def get_recommendations():
             "expired_recommendations": expired_recs,
             "actionable_count": len(live),
             "expired_count": len(expired_recs),
-            "message": (None if live else
-                        "No live setups — all are past their validity window or "
-                        "flagged STALE. Do NOT trade these."),
+            "message": recommendation_gate.summary_message(live, expired_recs),
             # Top-level recency/provenance (mandatory honest-staleness labeling).
             "data_source": scan.get("data_source", "flatfiles"),
             "session_date": scan.get("session_date"),
