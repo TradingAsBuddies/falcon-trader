@@ -1,5 +1,20 @@
 # Multi-Strategy Orchestrator Configuration
 
+# Risk budget per trade (1R). Quantity = per_trade_dollars / (entry - stop),
+# so every position loses the same amount if it is stopped out. The strategies'
+# position_size_pct remains as a ceiling on how much cash one name may take.
+# FALCON_RISK_PER_TRADE overrides this without a rebuild.
+risk:
+  per_trade_dollars: 75
+
+# Session behaviour
+session:
+  # End-of-day flatten at 15:55. Off: these strategies hold for max_hold_days
+  # (12-20 days), so a daily flatten would close every position the session it
+  # was opened and contradict the strategy parameters below. Exits come from
+  # stops, profit targets and max_hold_days. FALCON_EOD_FLATTEN=1 turns it on.
+  eod_flatten: false
+
 # Strategy Routing Rules
 routing:
   penny_stock_threshold: 5.0              # Price below this = penny stock

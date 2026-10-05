@@ -282,20 +282,21 @@ class BollingerEngine(BaseStrategyEngine):
         else:
             # No position - check for entry signals
             if self.check_at_lower_band(current_price, prices):
-                # Calculate position size
+                # Stop first: risk-based sizing needs the stop distance, so the
+                # stop cannot be computed after the quantity (falcon-trader#43).
+                stop_loss = max(
+                    current_price * (1 - self.min_stop_buffer),
+                    lower * 0.95  # 5% below lower band
+                )
+
                 quantity = self.calculate_position_size(
                     symbol,
                     current_price,
-                    self.position_size_pct
+                    self.position_size_pct,
+                    stop_loss=stop_loss,
                 )
 
                 if quantity > 0:
-                    # Calculate stop-loss and profit target
-                    # Stop below lower band
-                    stop_loss = max(
-                        current_price * (1 - self.min_stop_buffer),
-                        lower * 0.95  # 5% below lower band
-                    )
 
                     # Target at middle band (or upper band)
                     if self.exit_at_middle:
