@@ -16,7 +16,7 @@ import time
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from falcon_core import DatabaseManager
+from falcon_core import DatabaseManager, prices
 from falcon_trader import trading_guards
 from falcon_trader.orchestrator.routers.strategy_router import StrategyRouter
 from falcon_trader.orchestrator.validators.entry_validator import EntryValidator
@@ -299,13 +299,19 @@ class TradeExecutor:
                         WHERE symbol = %s
                     """, (current_price, datetime.now().isoformat(), symbol))
 
-                    print(f"\n{symbol} ({strategy}):")
-                    print(f"  Entry: ${pos_data['entry_price']:.2f}")
-                    print(f"  Current: ${current_price:.2f}")
+                    # Price maths in integer mills. entry_price arrives from
+                    # PostgreSQL as Decimal and current_price from the fetcher
+                    # as float; subtracting one from the other raised
+                    # TypeError for every position in the book, so no stop and
+                    # no target was ever evaluated (falcon-core#39).
+                    entry_price = prices.quantize(pos_data['entry_price'])
+                    current_price = prices.to_float(current_price)
+                    pnl_pct = prices.change_pct(entry_price, current_price) or 0.0
 
-                    # Calculate P&L
-                    pnl_pct = (current_price - pos_data['entry_price']) / pos_data['entry_price']
-                    print(f"  P&L: {pnl_pct:+.1%}")
+                    print(f"\n{symbol} ({strategy}):")
+                    print(f"  Entry: ${entry_price}")
+                    print(f"  Current: ${prices.quantize(current_price)}")
+                    print(f"  P&L: {pnl_pct:+.2f}%")
 
                     # Get engine for this strategy (map short name to full key)
                     engine_key = strategy_map.get(strategy, strategy)
@@ -334,9 +340,32 @@ class TradeExecutor:
                                 print(f"  [ERROR] Sell failed: {result.error}")
                         else:
                             print(f"  [HOLD] No exit signal")
+                            actions.append({
+                                'symbol': symbol,
+                                'action': 'HOLD',
+                                'current_price': current_price,
+                                'pnl_pct': pnl_pct,
+                            })
+                    else:
+                        # An unknown strategy name means no engine evaluated
+                        # this position: no stop and no target are in force.
+                        actions.append({
+                            'symbol': symbol,
+                            'action': 'ERROR',
+                            'reason': f"no engine for strategy '{strategy}'",
+                        })
 
                 except Exception as e:
+                    # Reported, not swallowed. Only SELLs used to be collected,
+                    # so a book that was monitored and held came back as an
+                    # empty list and the caller printed "No open positions to
+                    # monitor" while holding thirteen.
                     print(f"[ERROR] Error monitoring {symbol}: {e}")
+                    actions.append({
+                        'symbol': symbol,
+                        'action': 'ERROR',
+                        'reason': str(e),
+                    })
                     continue
 
         except Exception as e:
@@ -610,20 +639,22 @@ class TradeExecutor:
                     # Fetch current price
                     current_price = self.data_fetcher.get_current_price(symbol)
 
-                    position_value = current_price * pos_data['quantity']
-                    unrealized_pnl = (current_price - pos_data['entry_price']) * pos_data['quantity']
-                    unrealized_pnl_pct = (current_price - pos_data['entry_price']) / pos_data['entry_price']
+                    quantity = pos_data['quantity']
+                    entry_price = pos_data['entry_price']
+                    position_value = prices.notional(current_price, quantity)
+                    unrealized_pnl = prices.pnl(entry_price, current_price, quantity)
+                    unrealized_pnl_pct = prices.change_pct(entry_price, current_price) or 0.0
 
-                    total_position_value += position_value
-                    total_unrealized_pnl += unrealized_pnl
+                    total_position_value += float(position_value)
+                    total_unrealized_pnl += float(unrealized_pnl)
 
                     positions.append({
                         'symbol': symbol,
-                        'quantity': pos_data['quantity'],
-                        'entry_price': pos_data['entry_price'],
-                        'current_price': current_price,
-                        'position_value': position_value,
-                        'unrealized_pnl': unrealized_pnl,
+                        'quantity': float(quantity),
+                        'entry_price': prices.to_float(entry_price),
+                        'current_price': prices.to_float(current_price),
+                        'position_value': float(position_value),
+                        'unrealized_pnl': float(unrealized_pnl),
                         'unrealized_pnl_pct': unrealized_pnl_pct,
                         'strategy': pos_data.get('strategy', 'unknown')
                     })

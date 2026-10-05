@@ -19,6 +19,7 @@ from falcon_trader.risk_limits import KillSwitch
 from falcon_trader.symbol_state import load_symbol_state
 from falcon_trader.trading_guards import CooldownPolicy, check_cooldown
 from falcon_trader.orchestrator.utils.data_structures import Position
+from falcon_trader.orchestrator.utils.db_values import as_datetime, as_price, as_quantity
 
 logger = logging.getLogger(__name__)
 
@@ -130,15 +131,21 @@ class BaseStrategyEngine:
         except (KeyError, IndexError):
             strategy = self.strategy_name
 
+        # Coerced at this boundary so no engine ever meets a Decimal or an
+        # already-parsed datetime. PostgreSQL returns numeric as Decimal and
+        # timestamp as datetime; fromisoformat() on the latter raised
+        # "argument must be str" for every position, so this method never
+        # returned and nothing evaluated a stop or a target for the whole
+        # book (falcon-trader#48).
         return Position(
             symbol=result['symbol'],
-            quantity=result['quantity'],
-            entry_price=result['entry_price'],
-            current_price=result['entry_price'],  # Will be updated
-            stop_loss=stop_loss,
-            profit_target=profit_target,
+            quantity=as_quantity(result['quantity']),
+            entry_price=as_price(result['entry_price']),
+            current_price=as_price(result['entry_price']),  # Will be updated
+            stop_loss=as_price(stop_loss),
+            profit_target=as_price(profit_target),
             strategy=strategy,
-            entry_timestamp=datetime.fromisoformat(result['entry_date'])
+            entry_timestamp=as_datetime(result['entry_date']) or datetime.now(),
         )
 
     def get_account_balance(self) -> float:

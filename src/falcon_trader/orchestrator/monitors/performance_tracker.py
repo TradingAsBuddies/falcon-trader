@@ -20,6 +20,7 @@ from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 
 from falcon_core import DatabaseManager
+from falcon_trader.orchestrator.utils.db_values import as_datetime
 
 logger = logging.getLogger(__name__)
 
@@ -246,7 +247,8 @@ class PerformanceTracker:
             # Calculate metrics
             entry_price = float(trade['entry_price'])
             quantity = int(trade['quantity'])
-            entry_date = datetime.fromisoformat(trade['entry_date'])
+            # PostgreSQL returns a datetime here, not a string.
+            entry_date = as_datetime(trade['entry_date']) or datetime.now()
             exit_date = datetime.now()
 
             profit_loss = (exit_price - entry_price) * quantity
