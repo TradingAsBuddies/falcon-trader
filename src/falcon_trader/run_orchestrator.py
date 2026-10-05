@@ -8,17 +8,32 @@ import sys
 import yaml
 import time
 
-from falcon_trader import trading_guards
+from falcon_trader import screener_feed, trading_guards
 from datetime import datetime
 from falcon_trader.orchestrator.execution.trade_executor import TradeExecutor
 from falcon_trader.orchestrator.monitors.performance_tracker import PerformanceTracker
-from falcon_core import DatabaseManager
+from falcon_core import get_db_manager
 
 try:
     from dotenv import load_dotenv
     load_dotenv()
 except ImportError:
     pass
+
+
+def eod_flatten_enabled(config) -> bool:
+    """Whether to close every open position at 15:55.
+
+    Off unless asked for: the strategies hold for max_hold_days (12-20 days),
+    so flattening daily would close each position in the session it opened.
+    The operator chose swing behaviour for this deployment (falcon-trader#43).
+    """
+    raw = os.getenv('FALCON_EOD_FLATTEN')
+    if raw is None:
+        raw = ((config or {}).get('session') or {}).get('eod_flatten', False)
+    if isinstance(raw, bool):
+        return raw
+    return str(raw).strip().lower() in ('1', 'true', 'yes', 'on')
 
 
 def print_separator(char='=', length=80):
@@ -38,17 +53,29 @@ def print_section(title):
     print(f"\n{'='*20} {title} {'='*20}")
 
 
-def process_screener_results(executor, tracker, screener_file='screened_stocks.json'):
-    """Process AI screener results through orchestrator"""
+def process_screener_results(executor, tracker, db):
+    """Process the screener's recommendations, read from the database.
+
+    This used to read the relative path 'screened_stocks.json'. The screener
+    writes that file into its own container's volume and the orchestrator runs
+    in /app, so it was never found: every cycle printed "Screener file not
+    found" and no trade was ever placed (falcon-trader#43). Both containers
+    share PostgreSQL, where the screener records every run.
+    """
 
     print_section("PROCESSING AI SCREENER RESULTS")
 
-    if not os.path.exists(screener_file):
-        print(f"[ERROR] Screener file not found: {screener_file}")
+    recommendations, newest = screener_feed.latest_recommendations(db)
+
+    if not recommendations:
+        print("[WARN] No screener recommendations in the last 24h — nothing to process")
         return None
 
-    print(f"[ORCHESTRATOR] Processing {screener_file}...")
-    summary = executor.process_ai_screener(screener_file)
+    age = screener_feed.utc_now_naive() - newest if newest else None
+    print(f"[ORCHESTRATOR] {len(recommendations)} recommendation(s); "
+          f"newest screen {newest} UTC"
+          + (f" ({age.total_seconds() / 3600:.1f}h old)" if age else ""))
+    summary = executor.process_recommendations(recommendations)
 
     print(f"\n[RESULTS]")
     print(f"  Total Stocks: {summary['total_stocks']}")
@@ -211,11 +238,17 @@ def main():
 
     print(f"[OK] Configuration loaded")
 
-    # Initialize database
+    # Initialize database.
+    #
+    # This was a hardcoded SQLite file at ./paper_trading.db -- inside the
+    # container, thrown away on every restart -- while the dashboard, the
+    # screener and every sentinel read PostgreSQL. The orchestrator therefore
+    # monitored an empty book: real positions had no stop-loss or target
+    # monitoring from anything, and any trade it had placed would have been
+    # invisible (falcon-trader#43). get_db_manager() honors DATABASE_URL.
     print("[INIT] Initializing database...")
-    db_config = {'db_type': 'sqlite', 'db_path': './paper_trading.db'}
-    db = DatabaseManager(db_config)
-    print(f"[OK] Database ready")
+    db = get_db_manager()
+    print(f"[OK] Database ready ({getattr(db, 'db_type', 'unknown')})")
 
     # Initialize components
     print("[INIT] Initializing orchestrator components...")
@@ -231,7 +264,13 @@ def main():
 
         if command == '--process':
             # Process screener results
-            process_screener_results(executor, tracker)
+            process_screener_results(executor, tracker, db)
+
+        elif command == '--process-file':
+            # Process a screener JSON file (operator-supplied path)
+            path = sys.argv[2] if len(sys.argv) > 2 else 'screened_stocks.json'
+            print(f"[ORCHESTRATOR] Processing file {path}...")
+            executor.process_ai_screener(path)
 
         elif command == '--monitor':
             # Monitor positions
@@ -248,7 +287,7 @@ def main():
 
         elif command == '--once':
             # Full cycle once
-            process_screener_results(executor, tracker)
+            process_screener_results(executor, tracker, db)
             monitor_positions(executor, tracker)
             show_account_status(executor)
             show_performance_summary(tracker, days=1)
@@ -256,7 +295,8 @@ def main():
         else:
             print(f"[ERROR] Unknown command: {command}")
             print("\nUsage:")
-            print("  python3 run_orchestrator.py --process      # Process AI screener results")
+            print("  python3 run_orchestrator.py --process      # Process screener results from the database")
+            print("  python3 run_orchestrator.py --process-file F  # Process a screener JSON file")
             print("  python3 run_orchestrator.py --monitor      # Monitor open positions")
             print("  python3 run_orchestrator.py --performance  # Show performance summary")
             print("  python3 run_orchestrator.py --status       # Show account status")
@@ -267,6 +307,9 @@ def main():
     else:
         # Default: Run full cycle in daemon mode
         print("\n[MODE] Continuous monitoring (daemon mode)")
+        flatten_eod = eod_flatten_enabled(config)
+        print(f"[MODE] End-of-day flatten: {'on' if flatten_eod else 'off'}"
+              + ("" if flatten_eod else " — exits come from stops, targets and max_hold_days"))
         print("Press Ctrl+C to stop\n")
 
         try:
@@ -296,7 +339,7 @@ def main():
                 # simply carrying and being closed by whichever cycle happened
                 # to run last (falcon-trader#23).
                 today = datetime.now().date()
-                if trading_guards.should_flatten():
+                if flatten_eod and trading_guards.should_flatten():
                     if flattened_for != today:
                         print("[EOD] Flatten window reached; closing open positions")
                         flatten_positions(executor, tracker, reason='eod')
@@ -305,7 +348,7 @@ def main():
                     continue
 
                 # Process screener results
-                process_screener_results(executor, tracker)
+                process_screener_results(executor, tracker, db)
 
                 # Monitor positions
                 monitor_positions(executor, tracker)

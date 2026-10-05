@@ -7,6 +7,7 @@ Provides common functionality for all strategy engines:
 - Stop-loss and profit target monitoring
 - Database integration
 """
+import logging
 import sys
 import os
 from datetime import datetime
@@ -18,6 +19,8 @@ from falcon_trader.risk_limits import KillSwitch
 from falcon_trader.symbol_state import load_symbol_state
 from falcon_trader.trading_guards import CooldownPolicy, check_cooldown
 from falcon_trader.orchestrator.utils.data_structures import Position
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -146,22 +149,66 @@ class BaseStrategyEngine:
         )
         return float(result['cash']) if result else 0.0
 
-    def calculate_position_size(self, symbol: str, price: float,
-                               max_allocation: float = 0.25) -> int:
+    def risk_per_trade(self) -> Optional[float]:
+        """Dollars risked per trade (1R), or None to size by percentage.
+
+        FALCON_RISK_PER_TRADE overrides the config so an operator can change
+        size without a rebuild.
         """
-        Calculate position size based on available cash
+        raw = os.getenv('FALCON_RISK_PER_TRADE')
+        if raw is None:
+            raw = (self.config.get('risk') or {}).get('per_trade_dollars')
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            return None
+        return value if value > 0 else None
+
+    def calculate_position_size(self, symbol: str, price: float,
+                               max_allocation: float = 0.25,
+                               stop_loss: Optional[float] = None) -> int:
+        """Shares to buy: risk-based when a stop is known, else percentage.
+
+        Risk-based means one position loses the same amount as any other if it
+        is stopped out: quantity = risk_dollars / (entry - stop). Percentage of
+        cash sizes by conviction in the *account*, not in the trade, so a tight
+        stop and a wide one risked wildly different amounts -- 20-25% of the
+        book on every name.
+
+        The percentage still applies as a ceiling: a stop 1% away would
+        otherwise buy the whole account's worth of one symbol. Nothing may
+        exceed available cash.
 
         Args:
             symbol: Stock symbol
             price: Current price
-            max_allocation: Maximum % of portfolio to allocate (default 25%)
+            max_allocation: Ceiling, as a fraction of cash
+            stop_loss: Entry stop, when the caller has computed one
 
         Returns:
             Number of shares to buy
         """
+        if price <= 0:
+            return 0
+
         cash = self.get_account_balance()
-        max_investment = cash * max_allocation
-        quantity = int(max_investment / price)
+        ceiling = int(cash * max_allocation / price)
+        risk = self.risk_per_trade()
+
+        if risk is not None and stop_loss is not None and 0 < stop_loss < price:
+            per_share_risk = price - stop_loss
+            quantity = int(risk / per_share_risk)
+            quantity = min(quantity, ceiling)
+        else:
+            if risk is not None:
+                logger.warning(
+                    "[SIZE] %s: no usable stop (%s) for risk-based sizing; "
+                    "falling back to %.0f%% of cash",
+                    symbol, stop_loss, max_allocation * 100,
+                )
+            quantity = ceiling
+
+        quantity = min(quantity, int(cash / price))
         return max(quantity, 0)
 
     def execute_buy(self, symbol: str, quantity: int, price: float,

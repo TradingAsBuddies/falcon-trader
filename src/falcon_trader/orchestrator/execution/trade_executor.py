@@ -417,7 +417,12 @@ class TradeExecutor:
 
     def process_ai_screener(self, screener_file: str = 'screened_stocks.json') -> Dict:
         """
-        Process stocks from AI screener file
+        Process stocks from an AI screener file.
+
+        Kept for the --process-file CLI path. The orchestrator itself feeds
+        process_recommendations() from the database: the screener writes this
+        file into its own container's volume, so the path was never readable
+        from the trader (falcon-trader#43).
 
         Args:
             screener_file: Path to screener JSON file
@@ -425,35 +430,40 @@ class TradeExecutor:
         Returns:
             Dict with processing summary
         """
-        summary = {
+        if not os.path.exists(screener_file):
+            print(f"[ERROR] Screener file not found: {screener_file}")
+            return self._empty_summary()
+
+        with open(screener_file, 'r') as f:
+            screener_data = json.load(f)
+
+        # Handle array format (multiple screening sessions)
+        if isinstance(screener_data, list):
+            latest_screen = screener_data[-1] if screener_data else {}
+            recommendations = latest_screen.get('recommendations', [])
+        else:
+            # Object format
+            recommendations = screener_data.get('stocks', [])
+
+        return self.process_recommendations(recommendations)
+
+    @staticmethod
+    def _empty_summary() -> Dict:
+        return {
             'total_stocks': 0,
             'processed': 0,
             'trades_executed': 0,
             'skipped': 0,
             'errors': 0,
-            'details': []
+            'details': [],
         }
 
+    def process_recommendations(self, recommendations) -> Dict:
+        """Run a list of screener recommendations through the full workflow."""
+        summary = self._empty_summary()
+        recommendations = list(recommendations or [])
+
         try:
-            # Load screener data
-            if not os.path.exists(screener_file):
-                print(f"[ERROR] Screener file not found: {screener_file}")
-                return summary
-
-            with open(screener_file, 'r') as f:
-                screener_data = json.load(f)
-
-            # Handle array format (multiple screening sessions)
-            if isinstance(screener_data, list):
-                if len(screener_data) > 0:
-                    latest_screen = screener_data[-1]  # Most recent (last in array)
-                    recommendations = latest_screen.get('recommendations', [])
-                else:
-                    recommendations = []
-            else:
-                # Object format
-                recommendations = screener_data.get('stocks', [])
-
             summary['total_stocks'] = len(recommendations)
 
             print(f"\n[SCREENER] Processing {len(recommendations)} stocks from AI screener")

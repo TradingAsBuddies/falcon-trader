@@ -36,6 +36,11 @@ RUN pip install --no-cache-dir ".[youtube]"
 # Binding all interfaces *inside* the container is not the exposure decision --
 # the quadlet's PublishPort and the auth gate are. dashboard_server.py already
 # documents this as the intended container configuration.
+# Unbuffered stdout/stderr. The orchestrator logs with print(), and a
+# block-buffered pipe meant a long-running container produced no output at all
+# -- two days of uptime, zero log lines, while it silently did nothing
+# (falcon-trader#43).
+ENV PYTHONUNBUFFERED=1
 ENV FALCON_BIND_HOST=0.0.0.0
 ENV FLASK_HOST=0.0.0.0
 EXPOSE 5000
