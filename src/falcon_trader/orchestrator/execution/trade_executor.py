@@ -458,21 +458,52 @@ class TradeExecutor:
             'details': [],
         }
 
+    def max_new_entries_per_day(self) -> int:
+        """Entries allowed per session; 0 or less means unlimited."""
+        raw = os.getenv('FALCON_MAX_NEW_ENTRIES')
+        if raw is None:
+            raw = ((self.config.get('session') or {}).get(
+                'max_new_entries_per_day',
+                trading_guards.DEFAULT_MAX_NEW_ENTRIES_PER_DAY))
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return trading_guards.DEFAULT_MAX_NEW_ENTRIES_PER_DAY
+
     def process_recommendations(self, recommendations) -> Dict:
-        """Run a list of screener recommendations through the full workflow."""
+        """Run a list of screener recommendations through the full workflow.
+
+        Stops opening positions once the session's entry budget is spent. The
+        screener surfaces a dozen or more candidates and the engines signal BUY
+        on many of them, so an unbudgeted first cycle spends the whole cash
+        balance in one session -- and with 12-20 day holds there is then
+        nothing to trade with for days (falcon-trader#45).
+        """
         summary = self._empty_summary()
         recommendations = list(recommendations or [])
+        budget = self.max_new_entries_per_day()
 
         try:
             summary['total_stocks'] = len(recommendations)
 
             print(f"\n[SCREENER] Processing {len(recommendations)} stocks from AI screener")
+            if budget > 0:
+                used = trading_guards.entries_today(self.db)
+                print(f"[BUDGET] {used} of {budget} entries used this session")
             print("=" * 60)
 
             for rec in recommendations:
                 symbol = rec.get('ticker', rec.get('symbol', ''))
                 if not symbol:
                     continue
+
+                allowed = trading_guards.check_entry_budget(self.db, budget)
+                if not allowed.allowed:
+                    print(f"\n[BUDGET] {allowed.message}; "
+                          f"skipping the remaining candidates")
+                    summary['skipped'] += len(recommendations) - summary['processed']
+                    summary['budget_reached'] = allowed.message
+                    break
 
                 summary['processed'] += 1
 
