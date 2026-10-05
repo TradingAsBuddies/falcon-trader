@@ -12,7 +12,7 @@ from falcon_trader import screener_feed, trading_guards
 from datetime import datetime
 from falcon_trader.orchestrator.execution.trade_executor import TradeExecutor
 from falcon_trader.orchestrator.monitors.performance_tracker import PerformanceTracker
-from falcon_core import get_db_manager
+from falcon_core import get_db_manager, prices
 
 try:
     from dotenv import load_dotenv
@@ -94,10 +94,15 @@ def process_screener_results(executor, tracker, db):
             success = detail['success']
 
             if success:
+                # Quantity and price live under details['execution']; read from
+                # the top level they are absent, so every fill printed as
+                # "BUY 0 @ $0.00" -- today's three real trades looked like
+                # nothing had happened.
                 action = detail.get('action', 'N/A')
-                quantity = detail.get('quantity', 0)
-                price = detail.get('price', 0.0)
-                print(f"  [OK] {symbol}: {action} {quantity} @ ${price:.2f}")
+                execution = (detail.get('details') or {}).get('execution') or {}
+                quantity = execution.get('quantity', 0)
+                price = execution.get('price', 0.0)
+                print(f"  [OK] {symbol}: {action} {quantity} @ ${prices.quantize(price)}")
             else:
                 reason = detail.get('reason', 'Unknown')
                 print(f"  [SKIP] {symbol}: {reason}")
@@ -116,7 +121,9 @@ def monitor_positions(executor, tracker):
         print("[INFO] No open positions to monitor")
         return
 
-    print(f"[ORCHESTRATOR] Monitored {len(results)} positions")
+    failures = [r for r in results if r.get('action') == 'ERROR']
+    print(f"[ORCHESTRATOR] Monitored {len(results)} positions"
+          + (f" — {len(failures)} could not be evaluated" if failures else ""))
 
     for result in results:
         symbol = result['symbol']
@@ -125,10 +132,14 @@ def monitor_positions(executor, tracker):
         if action == 'HOLD':
             current_price = result.get('current_price', 0.0)
             pnl_pct = result.get('pnl_pct', 0.0)
-            print(f"  [HOLD] {symbol}: ${current_price:.2f} ({pnl_pct:+.2f}%)")
+            print(f"  [HOLD] {symbol}: ${prices.quantize(current_price)} ({pnl_pct:+.2f}%)")
         elif action == 'SELL':
             reason = result.get('reason', 'Exit signal')
             print(f"  [EXIT] {symbol}: {reason}")
+        elif action == 'ERROR':
+            # Named, because a position nothing could evaluate has no stop and
+            # no target in force, which is the opposite of a quiet hold.
+            print(f"  [UNMONITORED] {symbol}: {result.get('reason')}")
 
 
 def flatten_positions(executor, tracker, reason='eod'):
