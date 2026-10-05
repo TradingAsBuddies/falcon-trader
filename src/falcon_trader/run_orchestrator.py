@@ -3,6 +3,7 @@
 Multi-Strategy Orchestrator - Main Runner
 Processes AI screener results through the complete orchestrator workflow
 """
+import logging
 import os
 import sys
 import yaml
@@ -19,6 +20,14 @@ try:
     load_dotenv()
 except ImportError:
     pass
+
+
+logger = logging.getLogger(__name__)
+
+#: Cycles that may fail in a row before the process exits and lets systemd
+#: restart it. Enough to ride out a database restart, few enough that a real
+#: breakage is not hidden by retrying forever.
+MAX_CONSECUTIVE_CYCLE_FAILURES = 5
 
 
 def eod_flatten_enabled(config) -> bool:
@@ -327,6 +336,7 @@ def main():
             cycle = 0
             last_block = None
             flattened_for = None
+            consecutive_failures = 0
             while True:
                 # Market-hours gate. This 5-minute cycle ran around the clock,
                 # and monitor_positions() landing after the close is exactly
@@ -358,16 +368,38 @@ def main():
                     time.sleep(60)
                     continue
 
-                # Process screener results
-                process_screener_results(executor, tracker, db)
+                # One cycle's failure must not end the daemon.
+                #
+                # PostgreSQL recycles every backend when one dies -- a broken
+                # COPY pipe during a backup was enough -- and the next query
+                # raised OperationalError, which reached main() and exited 1.
+                # systemd restarted the container thirty seconds later, so the
+                # session lost a cycle over a two-second database blip. A
+                # trading loop that dies on a transient error is worse than one
+                # that logs it and comes back on the next cycle.
+                try:
+                    process_screener_results(executor, tracker, db)
+                    monitor_positions(executor, tracker)
 
-                # Monitor positions
-                monitor_positions(executor, tracker)
-
-                # Show status every 10 cycles
-                if cycle % 10 == 0:
-                    show_account_status(executor)
-                    show_performance_summary(tracker, days=1)
+                    # Show status every 10 cycles
+                    if cycle % 10 == 0:
+                        show_account_status(executor)
+                        show_performance_summary(tracker, days=1)
+                    consecutive_failures = 0
+                except KeyboardInterrupt:
+                    raise
+                except Exception as exc:
+                    consecutive_failures += 1
+                    logger.exception("Cycle %s failed", cycle)
+                    print(f"[ERROR] Cycle {cycle} failed: {type(exc).__name__}: {exc}")
+                    print(f"[ERROR] {consecutive_failures} consecutive failure(s); "
+                          f"retrying on the next cycle")
+                    # Exit rather than spin if it is not transient: systemd
+                    # restarts the unit, which re-reads config and reconnects.
+                    if consecutive_failures >= MAX_CONSECUTIVE_CYCLE_FAILURES:
+                        print(f"[FATAL] {consecutive_failures} cycles failed in a row; "
+                              f"exiting so the unit restarts")
+                        raise
 
                 # Wait before next cycle (5 minutes)
                 print(f"\n[SLEEP] Waiting 5 minutes until next cycle...")
