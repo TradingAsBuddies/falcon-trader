@@ -4,6 +4,7 @@ Strategy routing logic
 import sys
 import os
 from datetime import datetime
+from typing import Optional
 from falcon_trader.orchestrator.routers.stock_classifier import StockClassifier
 from falcon_trader.orchestrator.utils.data_structures import RoutingDecision, StockProfile
 
@@ -17,19 +18,32 @@ class StrategyRouter:
         self.strategy_mapping = config['strategy_mapping']
         self.sector_routing = config.get('sector_routing', {})
 
-    def route(self, symbol: str, use_yfinance: bool = False) -> RoutingDecision:
+    def route(self, symbol: str, use_yfinance: bool = False,
+              market_data: Optional[dict] = None,
+              sector: Optional[str] = None,
+              market_cap: Optional[float] = None) -> RoutingDecision:
         """
         Route stock to optimal strategy
 
         Args:
             symbol: Stock ticker symbol
-            use_yfinance: Whether to use yfinance for data (False = mock data for testing)
+            use_yfinance: Whether to use yfinance for data
+            market_data: Price history already fetched by the caller. Preferred:
+                with neither this nor yfinance the classifier returns *mock*
+                data, which is what made every real symbol route to the default
+                strategy (falcon-trader#46).
+            sector: Sector, when the caller knows it
+            market_cap: Capitalisation, when the caller knows it
 
         Returns:
             RoutingDecision with strategy, confidence, and reasoning
         """
         # Get stock profile
-        profile = self.classifier.get_stock_profile(symbol, use_yfinance=use_yfinance)
+        if market_data:
+            profile = self.classifier.profile_from_market_data(
+                symbol, market_data, sector=sector, market_cap=market_cap)
+        else:
+            profile = self.classifier.get_stock_profile(symbol, use_yfinance=use_yfinance)
 
         if profile.price == 0.0:
             # Failed to get data
@@ -98,7 +112,11 @@ class StrategyRouter:
                 score = 0.95  # Excellent for ETFs
             elif profile.classification == 'large_cap' and profile.volatility < 0.25:
                 score = 0.85  # Good for stable large caps
-            elif profile.classification in ['mid_cap', 'small_cap']:
+            elif profile.classification in ['mid_cap', 'small_cap', 'unknown_cap']:
+                # unknown_cap: the config's declared default strategy, so an
+                # unknown capitalisation does not hand the trade to momentum
+                # on no evidence. Price and volatility are still real, so a
+                # penny stock or a genuinely volatile name still outscores it.
                 score = 0.70  # Decent for mid/small caps
             elif profile.classification == 'penny_stock':
                 score = 0.30  # Poor for penny stocks

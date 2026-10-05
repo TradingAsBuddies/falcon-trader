@@ -97,23 +97,17 @@ class TradeExecutor:
             print(f"\n[EXECUTOR] Processing {symbol}")
             print("=" * 60)
 
-            # Step 1: Route to strategy
-            print(f"[STEP 1] Routing to strategy...")
-            routing_decision = self.router.route(symbol, use_yfinance=False)
-
-            print(f"  Strategy: {routing_decision.selected_strategy}")
-            print(f"  Classification: {routing_decision.classification}")
-            print(f"  Confidence: {routing_decision.confidence:.1%}")
-
-            result['details']['routing'] = {
-                'strategy': routing_decision.selected_strategy,
-                'classification': routing_decision.classification,
-                'confidence': routing_decision.confidence,
-                'reason': routing_decision.reason
-            }
-
-            # Step 2: Fetch market data
-            print(f"[STEP 2] Fetching market data...")
+            # Step 1: Fetch market data.
+            #
+            # Before routing, not after: routing used to run first and ask the
+            # classifier for a profile with live data disabled, which returns
+            # *mock* data -- price 0.0 for any symbol outside a small test
+            # dict. route() then took its "failed to fetch" branch and
+            # returned the default strategy for every real symbol, so
+            # momentum_breakout and bollinger_mean_reversion never ran
+            # (falcon-trader#46). These are the same bars the engine uses for
+            # its signal, so classifying from them costs nothing.
+            print(f"[STEP 1] Fetching market data...")
             market_data = self.data_fetcher.fetch_market_data(symbol, lookback_days=30)
 
             if not market_data or market_data.get('error'):
@@ -131,6 +125,30 @@ class TradeExecutor:
                 result['reason'] = f"Data quality check failed: {reason}"
                 print(f"  [ERROR] {result['reason']}")
                 return result
+
+            # Step 2: Route to strategy, on the real bars plus whatever the
+            # screener knew about the name.
+            print(f"[STEP 2] Routing to strategy...")
+            routing_decision = self.router.route(
+                symbol,
+                market_data=market_data,
+                sector=self._rec_sector(ai_recommendation),
+                market_cap=self._rec_market_cap(ai_recommendation),
+            )
+
+            print(f"  Strategy: {routing_decision.selected_strategy}")
+            print(f"  Classification: {routing_decision.classification}")
+            print(f"  Volatility: {routing_decision.profile.volatility:.1%}")
+            print(f"  Confidence: {routing_decision.confidence:.1%}")
+
+            result['details']['routing'] = {
+                'strategy': routing_decision.selected_strategy,
+                'classification': routing_decision.classification,
+                'confidence': routing_decision.confidence,
+                'reason': routing_decision.reason,
+                'volatility': routing_decision.profile.volatility,
+                'sector': routing_decision.profile.sector,
+            }
 
             result['details']['market_data'] = {
                 'price': market_data['price'],
@@ -446,6 +464,41 @@ class TradeExecutor:
             recommendations = screener_data.get('stocks', [])
 
         return self.process_recommendations(recommendations)
+
+    @staticmethod
+    def _rec_sector(rec) -> Optional[str]:
+        """Sector from a screener recommendation, when it carries one."""
+        if not isinstance(rec, dict):
+            return None
+        value = rec.get('sector') or rec.get('_sector')
+        value = str(value).strip() if value else ''
+        return value or None
+
+    @staticmethod
+    def _rec_market_cap(rec) -> Optional[float]:
+        """Capitalisation from a screener recommendation, else None.
+
+        None means unknown, and the classifier reports unknown_cap rather than
+        labelling the name a small cap.
+        """
+        if not isinstance(rec, dict):
+            return None
+        raw = rec.get('market_cap', rec.get('_market_cap'))
+        if raw is None:
+            return None
+        if isinstance(raw, (int, float)):
+            return float(raw) or None
+        text = str(raw).strip().upper().replace('$', '').replace(',', '')
+        if not text:
+            return None
+        multiplier = {'K': 1e3, 'M': 1e6, 'B': 1e9, 'T': 1e12}.get(text[-1])
+        if multiplier:
+            text = text[:-1]
+        try:
+            value = float(text) * (multiplier or 1.0)
+        except ValueError:
+            return None
+        return value or None
 
     @staticmethod
     def _empty_summary() -> Dict:

@@ -3,6 +3,8 @@ Stock classification for strategy routing
 """
 import sys
 import os
+from typing import Optional
+
 from falcon_trader.orchestrator.utils.data_structures import StockProfile
 
 
@@ -180,18 +182,76 @@ class StockClassifier:
                 classification='unknown'
             )
 
-    def _classify(self, price: float, volatility: float, market_cap: float, is_etf: bool) -> str:
-        """Classify stock type"""
+    def _classify(self, price: float, volatility: float, market_cap, is_etf: bool) -> str:
+        """Classify stock type.
+
+        market_cap None means "not known", which is different from small: a
+        missing capitalisation used to read as small_cap and would have labelled
+        NKE a small cap. Unknown is reported as such so the router can decline
+        to use cap-based rules instead of acting on a wrong label.
+        """
         if is_etf:
             return "etf"
         elif price < self.penny_threshold:
             return "penny_stock"
+        elif market_cap is None:
+            return "unknown_cap"
         elif market_cap > self.large_cap_threshold:
             return "large_cap"
         elif market_cap > 10e9:
             return "mid_cap"
         else:
             return "small_cap"
+
+    def profile_from_market_data(self, symbol: str, market_data: dict,
+                                 sector: Optional[str] = None,
+                                 market_cap: Optional[float] = None) -> StockProfile:
+        """Build a profile from the price history the orchestrator already has.
+
+        The executor called get_stock_profile(use_yfinance=False), which
+        returns *mock* data: a small dict of test symbols, and for anything
+        else price 0.0 and classification 'unknown'. route() then took its
+        "failed to fetch data" branch and returned rsi_mean_reversion for every
+        real symbol, so momentum_breakout and bollinger_mean_reversion never
+        ran at all (falcon-trader#46).
+
+        No new data source: price and volatility come from the bars already
+        fetched for signal generation. Sector and capitalisation are passed in
+        when a caller knows them, and left unknown rather than guessed.
+        """
+        prices = [p for p in (market_data.get('prices') or []) if p]
+        price = float(market_data.get('price') or (prices[-1] if prices else 0.0))
+        volatility = self.annualized_volatility(prices)
+        is_etf = symbol.upper() in {s.upper() for s in self.etf_list}
+
+        return StockProfile(
+            symbol=symbol,
+            price=price,
+            volatility=volatility,
+            market_cap=market_cap if market_cap is not None else 0.0,
+            sector=sector or "UNKNOWN",
+            is_etf=is_etf,
+            avg_volume=int(sum(market_data.get('volumes') or [0]) /
+                           max(len(market_data.get('volumes') or [1]), 1)),
+            classification=self._classify(price, volatility, market_cap, is_etf),
+        )
+
+    @staticmethod
+    def annualized_volatility(prices) -> float:
+        """Annualised standard deviation of daily returns.
+
+        Zero when there is not enough history; the router treats zero as "no
+        volatility evidence" rather than "a very calm stock".
+        """
+        closes = [float(p) for p in (prices or []) if p]
+        if len(closes) < 3:
+            return 0.0
+        returns = [(b - a) / a for a, b in zip(closes, closes[1:]) if a]
+        if len(returns) < 2:
+            return 0.0
+        mean = sum(returns) / len(returns)
+        variance = sum((r - mean) ** 2 for r in returns) / (len(returns) - 1)
+        return (variance ** 0.5) * (252 ** 0.5)
 
     def is_high_volatility(self, volatility: float) -> bool:
         """Check if stock has high volatility"""
