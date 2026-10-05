@@ -14,7 +14,7 @@ from datetime import datetime
 from typing import Optional, Dict, List
 from dataclasses import dataclass
 
-from falcon_core import DatabaseManager
+from falcon_core import DatabaseManager, prices
 from falcon_trader.risk_limits import KillSwitch
 from falcon_trader.symbol_state import load_symbol_state
 from falcon_trader.trading_guards import CooldownPolicy, check_cooldown
@@ -191,6 +191,12 @@ class BaseStrategyEngine:
         if price <= 0:
             return 0
 
+        # Size from quantized prices: a stop of 32.17649999 is not a real
+        # stop, and the risk per share it implies is not a real number.
+        price = prices.to_float(price)
+        if stop_loss is not None:
+            stop_loss = prices.to_float(stop_loss)
+
         cash = self.get_account_balance()
         ceiling = int(cash * max_allocation / price)
         risk = self.risk_per_trade()
@@ -271,8 +277,15 @@ class BaseStrategyEngine:
                     error=f"Already have position in {symbol}"
                 )
 
+            # One quantized price for the fill, the stored row, the stop and
+            # the target, so the cost debited and the price recorded cannot
+            # disagree in the fourth decimal.
+            price = prices.to_float(price)
+            stop_loss = prices.to_float(stop_loss) if stop_loss is not None else None
+            profit_target = prices.to_float(profit_target) if profit_target is not None else None
+
             # Check if we have enough cash
-            cost = quantity * price
+            cost = float(prices.notional(price, quantity))
             cash = self.get_account_balance()
 
             if cost > cash:
@@ -389,9 +402,12 @@ class BaseStrategyEngine:
             if quantity > position.quantity:
                 quantity = position.quantity
 
-            # Calculate P&L
-            pnl = (price - position.entry_price) * quantity
-            print(f"[P&L] {symbol}: sold {quantity} @ ${price:.4f}, entry @ ${position.entry_price:.4f}, P&L: ${pnl:.2f}")
+            # Calculate P&L in integer mills. entry_price comes back from
+            # PostgreSQL as Decimal and price arrives as float, and subtracting
+            # one from the other raised TypeError (falcon-core#39).
+            pnl = prices.pnl(position.entry_price, price, quantity)
+            print(f"[P&L] {symbol}: sold {quantity} @ ${prices.quantize(price)}, "
+                  f"entry @ ${prices.quantize(position.entry_price)}, P&L: ${pnl}")
 
             # Insert order record with P&L
             self.db.execute("""
@@ -459,9 +475,13 @@ class BaseStrategyEngine:
         Returns:
             True if stop-loss triggered
         """
-        if position.stop_loss > 0 and current_price <= position.stop_loss:
-            return True
-        return False
+        # Compared as integers: a stop and a price that render the same are
+        # the same number, so a position does not stop out on float noise in
+        # the seventeenth digit.
+        if position.stop_loss is None:
+            return False
+        stop = prices.to_mills(position.stop_loss)
+        return stop > 0 and prices.to_mills(current_price) <= stop
 
     def check_profit_target(self, position: Position, current_price: float) -> bool:
         """
@@ -474,9 +494,10 @@ class BaseStrategyEngine:
         Returns:
             True if profit target reached
         """
-        if position.profit_target > 0 and current_price >= position.profit_target:
-            return True
-        return False
+        if position.profit_target is None:
+            return False
+        target = prices.to_mills(position.profit_target)
+        return target > 0 and prices.to_mills(current_price) >= target
 
     def generate_signal(self, symbol: str, market_data: Dict) -> TradeSignal:
         """
