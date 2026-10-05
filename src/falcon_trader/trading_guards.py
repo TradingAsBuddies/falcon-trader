@@ -42,6 +42,10 @@ __all__ = [
     "should_flatten",
     "check_cooldown",
     "check_entry",
+    "DEFAULT_MAX_NEW_ENTRIES_PER_DAY",
+    "session_start_utc",
+    "entries_today",
+    "check_entry_budget",
 ]
 
 EASTERN = ZoneInfo("America/New_York")
@@ -345,3 +349,69 @@ def check_entry(
         round_trips_today=round_trips_today,
         moment=moment,
     )
+
+
+# --------------------------------------------------------------------------
+# daily entry budget (#45)
+# --------------------------------------------------------------------------
+
+#: New entries allowed per session. The screener surfaces a dozen or more
+#: candidates and the engines happily signal BUY on all of them, so the first
+#: cycle of a session would spend the entire cash balance and leave nothing to
+#: trade with the next day until something exits -- and these strategies hold
+#: for 12-20 days. Budgeting entries spreads deployment across sessions.
+DEFAULT_MAX_NEW_ENTRIES_PER_DAY = 3
+
+
+def session_start_utc(moment: Optional[_dt.datetime] = None) -> _dt.datetime:
+    """Midnight Eastern of `moment`'s session, as the naive UTC the DB stores.
+
+    orders.timestamp is a naive column written from datetime.now() inside
+    containers that run on UTC. The session day is Eastern. Counting with a
+    naive local date would bracket the wrong hours -- between 20:00 and 24:00
+    ET it would count tomorrow's orders.
+    """
+    now = _as_eastern(moment)
+    midnight = _dt.datetime.combine(now.date(), _dt.time(0, 0), tzinfo=EASTERN)
+    return midnight.astimezone(_dt.timezone.utc).replace(tzinfo=None)
+
+
+def entries_today(db, moment: Optional[_dt.datetime] = None) -> int:
+    """BUY orders placed so far in the current Eastern session.
+
+    Read from the database rather than counted in memory so a restart mid
+    session does not hand the orchestrator a fresh budget.
+    """
+    row = db.execute(
+        "SELECT COUNT(*) AS entries FROM orders "
+        "WHERE side = %s AND timestamp >= %s",
+        ("BUY", session_start_utc(moment)),
+        fetch="one",
+    )
+    if not row:
+        return 0
+    try:
+        return int(row["entries"])
+    except (KeyError, TypeError):
+        # Some drivers return a plain tuple for an aggregate.
+        return int(list(row)[0])
+
+
+def check_entry_budget(db, max_entries: int = DEFAULT_MAX_NEW_ENTRIES_PER_DAY,
+                       moment: Optional[_dt.datetime] = None) -> GuardResult:
+    """Refuse a new entry once the session's budget is spent.
+
+    A non-positive budget means unlimited, for an operator who wants the old
+    behaviour back.
+    """
+    if max_entries is None or max_entries <= 0:
+        return GuardResult.ok()
+
+    used = entries_today(db, moment)
+    if used >= max_entries:
+        return GuardResult.block(
+            "entry_budget_spent",
+            f"{used} entr{'y' if used == 1 else 'ies'} already placed this "
+            f"session; budget is {max_entries}",
+        )
+    return GuardResult.ok()

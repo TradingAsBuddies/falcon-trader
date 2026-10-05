@@ -15,6 +15,13 @@ session:
   # stops, profit targets and max_hold_days. FALCON_EOD_FLATTEN=1 turns it on.
   eod_flatten: false
 
+  # New entries per session. The screener surfaces a dozen-plus candidates and
+  # the engines signal BUY on many at once, which would spend the whole cash
+  # balance in one session; with 12-20 day holds there would then be nothing to
+  # trade for days. 0 or less means unlimited.
+  # FALCON_MAX_NEW_ENTRIES overrides.
+  max_new_entries_per_day: 3
+
 # Strategy Routing Rules
 routing:
   penny_stock_threshold: 5.0              # Price below this = penny stock
