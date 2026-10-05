@@ -12,6 +12,7 @@ Features:
 - Adaptive routing confidence adjustments
 - Performance reports and insights
 """
+import logging
 import os
 import sys
 from datetime import datetime, timedelta
@@ -19,6 +20,8 @@ from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 
 from falcon_core import DatabaseManager
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -73,12 +76,27 @@ class PerformanceTracker:
         print("[TRACKER] Performance Tracker initialized")
 
     def _create_tables(self):
-        """Create tracking tables if they don't exist"""
+        """Create tracking tables if they don't exist.
+
+        AUTOINCREMENT is SQLite-only: against PostgreSQL the first statement
+        raised `syntax error at or near "AUTOINCREMENT"`, the except swallowed
+        it, and the other two never ran. On this deployment the three tables
+        happened to exist already, so the tracker worked and printed an error
+        on every start; on a fresh PostgreSQL database it would have had no
+        tables at all. Same shape as falcon_core.db_manager: branch the key
+        syntax on the backend.
+        """
+        # Default to PostgreSQL, the deployed backend: a DatabaseManager always
+        # reports db_type, and defaulting the other way is what emitted
+        # SQLite-only syntax into PostgreSQL in the first place.
+        serial = ('INTEGER PRIMARY KEY AUTOINCREMENT'
+                  if getattr(self.db, 'db_type', 'postgresql') == 'sqlite'
+                  else 'SERIAL PRIMARY KEY')
         try:
             # Routing decisions table
-            self.db.execute("""
+            self.db.execute(f"""
                 CREATE TABLE IF NOT EXISTS routing_decisions (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id {serial},
                     decision_id TEXT UNIQUE NOT NULL,
                     symbol TEXT NOT NULL,
                     selected_strategy TEXT NOT NULL,
@@ -90,9 +108,9 @@ class PerformanceTracker:
             """)
 
             # Trade tracking table
-            self.db.execute("""
+            self.db.execute(f"""
                 CREATE TABLE IF NOT EXISTS trade_tracking (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id {serial},
                     trade_id TEXT UNIQUE NOT NULL,
                     symbol TEXT NOT NULL,
                     strategy TEXT NOT NULL,
@@ -112,9 +130,9 @@ class PerformanceTracker:
             """)
 
             # Strategy metrics table (aggregated)
-            self.db.execute("""
+            self.db.execute(f"""
                 CREATE TABLE IF NOT EXISTS strategy_metrics (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id {serial},
                     strategy TEXT NOT NULL,
                     stock_type TEXT NOT NULL,
                     period_start TEXT NOT NULL,
@@ -138,6 +156,9 @@ class PerformanceTracker:
             print("[TRACKER] Database tables ready")
 
         except Exception as e:
+            # Loud: without these tables nothing records what the strategies
+            # did, and the tracker is the only place that measures them.
+            logger.exception("Could not create tracking tables")
             print(f"[ERROR] Error creating tables: {e}")
 
     def log_routing_decision(self, decision_id: str, symbol: str, strategy: str,
