@@ -505,26 +505,49 @@ class TradeExecutor:
 
     @staticmethod
     def _rec_market_cap(rec) -> Optional[float]:
-        """Capitalisation from a screener recommendation, else None.
+        """Capitalisation in dollars from a screener recommendation, else None.
 
         None means unknown, and the classifier reports unknown_cap rather than
         labelling the name a small cap.
+
+        Three shapes reach this, so the unit is resolved rather than assumed:
+
+        * ``market_cap_usd`` -- dollars, written by the screener since
+          falcon-core#41. Preferred, because its name states its unit.
+        * a suffixed string like "48.50B" -- absolute, from the HTML scrape
+          path and from anything a model wrote.
+        * a bare number like "3613.63" -- Finviz's CSV cell, which is in
+          *millions*. Read as dollars it made CDNA a $3.6K company; every
+          candidate classified small_cap and nothing could ever be mid or
+          large cap.
         """
         if not isinstance(rec, dict):
             return None
+
+        explicit = rec.get('market_cap_usd')
+        if explicit is not None:
+            try:
+                return float(explicit) or None
+            except (TypeError, ValueError):
+                pass
+
         raw = rec.get('market_cap', rec.get('_market_cap'))
         if raw is None:
             return None
         if isinstance(raw, (int, float)):
-            return float(raw) or None
+            # A bare number carries Finviz's millions convention.
+            return (float(raw) * 1e6) or None
         text = str(raw).strip().upper().replace('$', '').replace(',', '')
         if not text:
             return None
         multiplier = {'K': 1e3, 'M': 1e6, 'B': 1e9, 'T': 1e12}.get(text[-1])
         if multiplier:
             text = text[:-1]
+        else:
+            # No suffix: Finviz's CSV cell, in millions.
+            multiplier = 1e6
         try:
-            value = float(text) * (multiplier or 1.0)
+            value = float(text) * multiplier
         except ValueError:
             return None
         return value or None
