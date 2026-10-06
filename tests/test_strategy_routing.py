@@ -155,13 +155,53 @@ def test_the_three_engines_are_reachable():
 # ── facts carried on the recommendation ─────────────────────────────────
 
 @pytest.mark.parametrize("raw,expected", [
+    # Suffixed values are absolute: the HTML scrape path, and model text.
     ("6.50B", 6.5e9), ("$6.50B", 6.5e9), ("950M", 950e6), ("1.2T", 1.2e12),
-    ("4,500M", 4.5e9), (7.5e9, 7.5e9), ("", None), ("n/a", None),
-    (None, None), (0, None), ("0", None),
+    ("4,500M", 4.5e9),
+    # Bare numbers are Finviz's CSV cell, which is in millions.
+    ("3613.63", 3.61363e9), ("4859715.75", 4.85971575e12), (11246.49, 1.124649e10),
+    ("", None), ("n/a", None), (None, None), (0, None), ("0", None),
 ])
 def test_market_cap_is_read_from_a_recommendation(raw, expected):
     rec = {"ticker": "X"} if raw is None else {"ticker": "X", "market_cap": raw}
-    assert TradeExecutor._rec_market_cap(rec) == expected
+    assert TradeExecutor._rec_market_cap(rec) == pytest.approx(expected) if expected else \
+        TradeExecutor._rec_market_cap(rec) == expected
+
+
+def test_the_dollar_field_wins_when_the_screener_supplies_it():
+    """market_cap_usd states its unit; the raw cell does not."""
+    rec = {"ticker": "X", "market_cap": "3613.63", "market_cap_usd": 3.61363e9}
+    assert TradeExecutor._rec_market_cap(rec) == pytest.approx(3.61363e9)
+
+
+def test_a_bare_number_no_longer_shrinks_a_company_by_a_million():
+    """The regression: CDNA read as a $3.6K company, so it classified small_cap."""
+    assert TradeExecutor._rec_market_cap({"market_cap": "3613.63"}) == pytest.approx(3.61363e9)
+
+
+def test_a_mega_cap_from_the_csv_reaches_large_cap():
+    """AAPL's cell is 4859715.75; the router's large_cap threshold is $100B."""
+    assert TradeExecutor._rec_market_cap({"market_cap": "4859715.75"}) > 100e9
+
+
+def test_an_unusable_dollar_field_falls_back_to_the_raw_cell():
+    rec = {"market_cap": "3613.63", "market_cap_usd": "junk"}
+    assert TradeExecutor._rec_market_cap(rec) == pytest.approx(3.61363e9)
+
+
+def test_elanco_classifies_as_mid_cap_from_its_csv_cell():
+    """ELAN 11246.49 = $11.2B: mid_cap, which nothing could reach before."""
+    cap = TradeExecutor._rec_market_cap({"market_cap": "11246.49"})
+    profile = StockClassifier(CONFIG).profile_from_market_data(
+        "ELAN", _bars(26.0, 0.0), market_cap=cap)
+    assert profile.classification == "mid_cap"
+
+
+def test_apple_classifies_as_large_cap_from_its_csv_cell():
+    cap = TradeExecutor._rec_market_cap({"market_cap": "4859715.75"})
+    profile = StockClassifier(CONFIG).profile_from_market_data(
+        "AAPL", _bars(332.99, 0.0), market_cap=cap)
+    assert profile.classification == "large_cap"
 
 
 @pytest.mark.parametrize("rec,expected", [
