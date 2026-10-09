@@ -13,7 +13,7 @@ from falcon_trader import screener_feed, trading_guards
 from datetime import datetime
 from falcon_trader.orchestrator.execution.trade_executor import TradeExecutor
 from falcon_trader.orchestrator.monitors.performance_tracker import PerformanceTracker
-from falcon_core import get_db_manager, prices
+from falcon_core import get_db_manager, prices  # noqa: F401  (prices used below)
 
 try:
     from dotenv import load_dotenv
@@ -184,34 +184,46 @@ def show_account_status(executor):
 
     db = executor.db
 
-    # Get account info
-    account = db.execute("""
-        SELECT cash, total_value
-        FROM account
-        ORDER BY id DESC
-        LIMIT 1
-    """, fetch='one')
+    # Account rows come back as mappings from PostgreSQL (RealDictCursor) and
+    # as tuples from SQLite. This function was written for tuples: it did
+    # `cash, total_value = account`, which on a mapping unpacks the *key
+    # names*, and it selected a total_value column that account does not have:
+    #
+    #   [ERROR] Cycle 170 failed: UndefinedColumn: column "total_value" does
+    #   not exist
+    #
+    # It runs every tenth cycle, so account status has not printed once since
+    # the orchestrator moved to PostgreSQL (falcon-trader#51). The cycle guard
+    # caught it and carried on, which is why it cost nothing but the report.
+    account = db.execute(
+        "SELECT cash FROM account ORDER BY id DESC LIMIT 1", fetch='one')
+    cash = prices.as_decimal(account['cash']) if account else prices.as_decimal(0)
 
-    if account:
-        cash, total_value = account
-        print(f"  Cash: ${cash:,.2f}")
-        print(f"  Total Value: ${total_value:,.2f}")
+    positions = db.execute(
+        "SELECT symbol, quantity, entry_price, current_price FROM positions "
+        "WHERE quantity > 0 ORDER BY symbol", fetch='all') or []
 
-    # Get open positions
-    positions = db.execute("""
-        SELECT symbol, quantity, entry_price, current_price,
-               (current_price - entry_price) / entry_price * 100 as pnl_pct
-        FROM positions
-        WHERE quantity > 0
-    """, fetch='all')
+    # total_value is derived, not stored: cash plus what the positions are
+    # marked at. Computed through falcon_core.prices so it agrees with every
+    # other total the platform prints.
+    positions_value = sum(
+        (prices.notional(row['current_price'] or row['entry_price'], row['quantity'])
+         for row in positions), prices.as_decimal(0))
 
-    if positions:
-        print(f"\n  Open Positions: {len(positions)}")
-        for symbol, qty, entry, current, pnl in positions:
-            value = qty * current
-            print(f"    {symbol}: {qty} @ ${entry:.2f} -> ${current:.2f} ({pnl:+.2f}%) = ${value:,.2f}")
-    else:
-        print(f"\n  Open Positions: 0")
+    print(f"  Cash: ${cash:,.2f}")
+    print(f"  Positions: ${positions_value:,.2f}")
+    print(f"  Total Value: ${cash + positions_value:,.2f}")
+
+    print(f"\n  Open Positions: {len(positions)}")
+    for row in positions:
+        symbol = row['symbol']
+        quantity = row['quantity']
+        entry = row['entry_price']
+        current = row['current_price'] or entry
+        pnl_pct = prices.change_pct(entry, current) or 0.0
+        value = prices.notional(current, quantity)
+        print(f"    {symbol}: {float(quantity):g} @ ${prices.quantize(entry)} -> "
+              f"${prices.quantize(current)} ({pnl_pct:+.2f}%) = ${value:,.2f}")
 
 
 def main():
