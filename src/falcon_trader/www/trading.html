@@ -101,6 +101,8 @@
             .stats-grid { grid-template-columns: repeat(2, 1fr); }
             .panels { grid-template-columns: 1fr; }
         }
+            .ticker-link { color: #66d9ef; text-decoration: underline; text-underline-offset: 2px; }
+        .ticker-link:hover { color: #a6e22e; }
     </style>
 </head>
 <body>
@@ -272,6 +274,20 @@
     </div>
 
     <script>
+        // Finviz quote link for a ticker. Prefers symbol_html from the API
+        // (falcon-trader#52), falls back to building the URL here so a page
+        // works against an older response. Escaped: a ticker is feed data.
+        function tickerLink(sym, text) {
+            if (!sym) return '';
+            const clean = String(sym).trim();
+            if (!/^[A-Za-z0-9][A-Za-z0-9.\-]{0,9}$/.test(clean)) return escHtmlTicker(clean);
+            const url = 'https://elite.finviz.com/stock?t=' + encodeURIComponent(clean.toUpperCase());
+            return `<a href="${url}" target="_blank" rel="noopener" class="ticker-link">${escHtmlTicker(text || clean)}</a>`;
+        }
+        function escHtmlTicker(v) {
+            return String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        }
+
         async function loadAccount() {
             try {
                 const response = await fetch('/api/account');
@@ -334,7 +350,7 @@
                     const na = '<span title="no current quote" style="color:#75715e;">—</span>';
 
                     html += `<tr>
-                        <td class="ticker">${p.symbol}${stale}</td>
+                        <td class="ticker">${tickerLink(p.symbol)}${stale}</td>
                         <td>${p.quantity}</td>
                         <td>$${p.avgPrice.toFixed(2)}</td>
                         <td>${priced ? '$' + p.currentPrice.toFixed(2) : na}</td>
@@ -373,7 +389,7 @@
 
                     html += `<tr>
                         <td>${timeStr}</td>
-                        <td class="ticker">${t.symbol}</td>
+                        <td class="ticker">${tickerLink(t.symbol)}</td>
                         <td class="${sideClass}">${t.side.toUpperCase()}</td>
                         <td>${t.quantity}</td>
                         <td>$${t.price.toFixed(2)}</td>
@@ -403,7 +419,7 @@
                 let html = '';
                 data.recommendations.forEach(r => {
                     html += `<tr>
-                        <td class="ticker">${r.ticker}</td>
+                        <td class="ticker">${tickerLink(r.ticker)}</td>
                         <td>${r.company || '-'}</td>
                         <td>${r.entry_price_range}</td>
                         <td>${r.target_price}</td>
@@ -562,7 +578,7 @@
                 tbody.innerHTML = rows.length === 0
                     ? '<tr><td colspan="6" style="text-align:center;color:#75715e;">No held or recently traded symbols</td></tr>'
                     : rows.map(r => `<tr>
-                        <td class="ticker">${esc(r.symbol)}</td>
+                        <td class="ticker">${tickerLink(r.symbol)}</td>
                         <td>${r.held ? 'yes' : ''}</td>
                         <td class="${r.entry_allowed ? 'positive' : 'negative'}" title="${esc(r.block_message)}">
                             ${r.entry_allowed ? 'allowed' : 'blocked — ' + esc(r.block_reason)}</td>

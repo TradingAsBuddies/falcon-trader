@@ -14,7 +14,7 @@ from falcon_core.http import http_get
 
 from falcon_trader import auth, portfolio
 from falcon_trader.market_movers import build_movers
-from falcon_trader import recommendation_gate, risk_control
+from falcon_trader import recommendation_gate, risk_control, symbol_links
 from falcon_trader.orchestrator.utils.timezone import now_et
 
 # Optional YouTube strategy support
@@ -123,6 +123,13 @@ db = get_db_manager()
 # because `bot` is assigned in main(), after this module is imported.
 app.register_blueprint(risk_control.create_blueprint(
     get_bot=lambda: bot, get_db=lambda: db))
+
+# Every symbol in every /api/ response gains symbol_url and symbol_html
+# alongside its plain value, so a ticker on a page links to its Finviz quote.
+# Registered once rather than decorating eighty routes, so an endpoint added
+# later carries links without anyone opting in. The plain value is untouched:
+# the risk panel keys rows by it and the order ticket posts it back.
+symbol_links.install(app)
 
 # --- DB-persisted runtime config (editable from the website via /api/config) ---
 def _config_init():
