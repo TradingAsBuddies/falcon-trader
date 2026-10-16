@@ -170,6 +170,8 @@
             color: #f92672;
             margin-bottom: 1rem;
         }
+            .ticker-link { color: #66d9ef; text-decoration: underline; text-underline-offset: 2px; }
+        .ticker-link:hover { color: #a6e22e; }
     </style>
 </head>
 <body>
@@ -320,6 +322,20 @@
     </div>
 
     <script>
+        // Finviz quote link for a ticker. Prefers symbol_html from the API
+        // (falcon-trader#52), falls back to building the URL here so a page
+        // works against an older response. Escaped: a ticker is feed data.
+        function tickerLink(sym, text) {
+            if (!sym) return '';
+            const clean = String(sym).trim();
+            if (!/^[A-Za-z0-9][A-Za-z0-9.\-]{0,9}$/.test(clean)) return escHtmlTicker(clean);
+            const url = 'https://elite.finviz.com/stock?t=' + encodeURIComponent(clean.toUpperCase());
+            return `<a href="${url}" target="_blank" rel="noopener" class="ticker-link">${escHtmlTicker(text || clean)}</a>`;
+        }
+        function escHtmlTicker(v) {
+            return String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        }
+
         const API_BASE = '';
         let returnChart = null;
         let dailyChart = null;
@@ -455,7 +471,7 @@
                     <tr>
                         <td>${r.trading_date}</td>
                         <td>${r.strategy_name}</td>
-                        <td><strong>${r.symbol}</strong></td>
+                        <td><strong>${tickerLink(r.symbol)}</strong></td>
                         <td>${r.interval}</td>
                         <td class="${getReturnClass(r.total_return)}">${formatPercent(r.total_return)}</td>
                         <td class="negative">${formatPercent(r.max_drawdown)}</td>
