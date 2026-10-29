@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Falcon — Strategy Manager</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1b1d1e; color: #f8f8f2; font-size: 14px;
+        }
+        .container { max-width: 1200px; margin: 0 auto; padding: 1.5rem; }
+        header {
+            display: flex; align-items: baseline; justify-content: space-between;
+            border-bottom: 1px solid #3e3d32; padding-bottom: 1rem; margin-bottom: 1.25rem;
+        }
+        h1 { font-size: 1.5rem; color: #66d9ef; }
+        .back-link { color: #75715e; text-decoration: none; font-size: 0.85rem; }
+        .back-link:hover { color: #66d9ef; }
+        .meta { color: #75715e; font-size: 0.8rem; }
+
+        .group-title {
+            font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em;
+            color: #75715e; margin: 1.25rem 0 0.5rem;
+        }
+        .strategy {
+            background: #272822; border: 1px solid #3e3d32; border-radius: 8px;
+            padding: 0.9rem 1rem; margin-bottom: 0.6rem;
+        }
+        .strategy-head {
+            display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;
+        }
+        .name { font-weight: 700; font-size: 1rem; color: #f8f8f2; }
+        .badge {
+            font-size: 0.7rem; padding: 2px 8px; border-radius: 10px;
+            text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600;
+        }
+        .badge.paper_trading { background: #4d5a1f; color: #a6e22e; }
+        .badge.backtest { background: #3a3f52; color: #66d9ef; }
+        .badge.retired { background: #3e3d32; color: #75715e; }
+        .interval { color: #75715e; font-size: 0.8rem; }
+        .symbols { color: #75715e; font-size: 0.8rem; }
+        .symbols a { color: #66d9ef; text-decoration: none; }
+        .symbols a:hover { text-decoration: underline; }
+
+        .metrics {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+            gap: 0.5rem 1rem; margin: 0.7rem 0 0.4rem;
+        }
+        .metric .label {
+            font-size: 0.68rem; color: #75715e; text-transform: uppercase; letter-spacing: 0.04em;
+        }
+        .metric .value { font-size: 0.95rem; font-weight: 600; }
+        .positive { color: #a6e22e; } .negative { color: #f92672; } .neutral { color: #75715e; }
+
+        .warn {
+            background: #3a2f12; color: #e6db74; border-radius: 6px;
+            padding: 0.45rem 0.6rem; font-size: 0.8rem; margin-top: 0.5rem;
+        }
+        .notes {
+            white-space: pre-wrap; color: #75715e; font-size: 0.78rem;
+            border-left: 2px solid #3e3d32; padding-left: 0.6rem; margin-top: 0.6rem;
+            max-height: 7em; overflow-y: auto;
+        }
+        .actions { display: flex; gap: 0.4rem; margin-top: 0.7rem; flex-wrap: wrap; align-items: center; }
+        button {
+            border: none; border-radius: 6px; padding: 5px 12px; cursor: pointer;
+            font-weight: 600; font-size: 0.8rem;
+        }
+        .promote { background: #a6e22e; color: #1b1d1e; }
+        .demote { background: #e6db74; color: #1b1d1e; }
+        .retire { background: #f92672; color: #f8f8f2; }
+        .reinstate { background: #66d9ef; color: #1b1d1e; }
+        .history-btn { background: #3e3d32; color: #f8f8f2; }
+        button:disabled { opacity: 0.45; cursor: not-allowed; }
+        .result { font-size: 0.8rem; color: #75715e; }
+
+        details.params { margin-top: 0.6rem; }
+        details.params summary { cursor: pointer; color: #75715e; font-size: 0.78rem; }
+        .param { display: inline-block; margin: 0.25rem 0.9rem 0 0; font-size: 0.75rem; color: #75715e; }
+        .param b { color: #f8f8f2; font-weight: 600; }
+
+        table { width: 100%; border-collapse: collapse; margin-top: 0.6rem; }
+        th, td { padding: 4px 8px; text-align: right; border-bottom: 1px solid #3e3d32; font-size: 0.78rem; }
+        th:first-child, td:first-child { text-align: left; }
+        th { color: #75715e; font-weight: 600; text-transform: uppercase; font-size: 0.68rem; }
+        .ticker-link { color: #66d9ef; text-decoration: underline; text-underline-offset: 2px; }
+        .ticker-link:hover { color: #a6e22e; }
+        .empty { color: #75715e; padding: 1rem 0; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <header>
+        <div>
+            <h1>Strategy Manager</h1>
+            <div class="meta" id="summary">loading…</div>
+        </div>
+        <a class="back-link" href="/">&larr; Dashboard</a>
+    </header>
+
+    <div id="roster"><div class="empty">Loading roster…</div></div>
+</div>
+
+<script>
+    // Finviz quote link for a ticker, escaped: a ticker is feed data.
+    function tickerLink(sym) {
+        const clean = String(sym ?? '').trim();
+        if (!/^[A-Za-z0-9][A-Za-z0-9.\-]{0,9}$/.test(clean)) return esc(clean);
+        const url = 'https://elite.finviz.com/stock?t=' + encodeURIComponent(clean.toUpperCase());
+        return `<a href="${url}" target="_blank" rel="noopener" class="ticker-link">${esc(clean)}</a>`;
+    }
+    function esc(v) {
+        return String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
+    function pct(v) { return v === null || v === undefined ? '—' : (v * 100).toFixed(2) + '%'; }
+    function num(v, dp = 2) { return v === null || v === undefined ? '—' : Number(v).toFixed(dp); }
+    function sign(v) { return v === null || v === undefined ? 'neutral' : (v > 0 ? 'positive' : (v < 0 ? 'negative' : 'neutral')); }
+
+    const LABEL = { promote: 'Promote to paper', demote: 'Back to backtest',
+                    retire: 'Retire', reinstate: 'Reinstate to backtest' };
+    const TARGET = { promote: 'paper_trading', demote: 'backtest',
+                     retire: 'retired', reinstate: 'backtest' };
+    // Which move a target represents, given where the strategy is now.
+    function moveFor(status, target) {
+        if (target === 'paper_trading') return 'promote';
+        if (target === 'retired') return 'retire';
+        return status === 'retired' ? 'reinstate' : 'demote';
+    }
+
+    async function loadRoster() {
+        const host = document.getElementById('roster');
+        try {
+            const response = await fetch('/api/roster');
+            const data = await response.json();
+            if (!response.ok || !data.strategies) throw new Error(data.error || `HTTP ${response.status}`);
+            render(data.strategies);
+        } catch (e) {
+            host.innerHTML = `<div class="warn">Roster unavailable: ${esc(e.message)}. No strategy state has been changed.</div>`;
+            document.getElementById('summary').textContent = '';
+        }
+    }
+
+    function render(strategies) {
+        const counts = strategies.reduce((acc, s) => (acc[s.status] = (acc[s.status] || 0) + 1, acc), {});
+        document.getElementById('summary').textContent =
+            `${strategies.length} strategies — ` +
+            ['paper_trading', 'backtest', 'retired']
+                .map(s => `${counts[s] || 0} ${s.replace('_', ' ')}`).join(' · ');
+
+        const groups = { paper_trading: 'Paper trading', backtest: 'Backtesting', retired: 'Retired' };
+        const host = document.getElementById('roster');
+        host.innerHTML = Object.entries(groups).map(([status, title]) => {
+            const rows = strategies.filter(s => s.status === status);
+            if (!rows.length) return '';
+            return `<div class="group-title">${title} (${rows.length})</div>` +
+                   rows.map(card).join('');
+        }).join('') || '<div class="empty">The roster is empty.</div>';
+    }
+
+    function card(s) {
+        // Signals beside trades: a strategy generating signals and trading none
+        // is failing differently from one that generates nothing at all.
+        // Keyed on recent runs, not all-time: signals_count only exists for
+        // runs since 2026-10-16, so an older strategy legitimately shows zero.
+        const deadSignals = s.signals > 0 && s.trades === 0;
+        const noSignals = s.recent_runs > 0 && s.signals === 0;
+        const notBacktested = s.recent_runs === 0;
+        const capped = s.params && s.params.max_price;
+
+        return `
+        <div class="strategy" id="s-${esc(s.name)}">
+            <div class="strategy-head">
+                <span class="name">${esc(s.name)}</span>
+                <span class="badge ${esc(s.status)}">${esc(s.status.replace('_', ' '))}</span>
+                <span class="interval">${esc(s.interval || '—')}</span>
+                <span class="symbols">${(s.symbols || []).map(tickerLink).join(' ')}</span>
+            </div>
+
+            <div class="metrics">
+                <div class="metric"><div class="label">Backtest return</div>
+                    <div class="value ${sign(s.backtest.total_return)}">${pct(s.backtest.total_return)}</div></div>
+                <div class="metric"><div class="label">Sharpe</div>
+                    <div class="value ${sign(s.backtest.sharpe)}">${num(s.backtest.sharpe)}</div></div>
+                <div class="metric"><div class="label">Win rate</div>
+                    <div class="value">${pct(s.backtest.win_rate)}</div></div>
+                <div class="metric"><div class="label">Profit factor</div>
+                    <div class="value">${num(s.backtest.profit_factor)}</div></div>
+                <div class="metric"><div class="label">Paper sharpe</div>
+                    <div class="value ${sign(s.paper.sharpe)}">${num(s.paper.sharpe)}</div></div>
+                <div class="metric"><div class="label">Runs (all)</div>
+                    <div class="value">${s.runs}</div></div>
+                <div class="metric"><div class="label">Signals (${s.activity_window_days}d)</div>
+                    <div class="value">${s.signals}</div></div>
+                <div class="metric"><div class="label">Trades (${s.activity_window_days}d)</div>
+                    <div class="value">${s.trades}</div></div>
+                <div class="metric"><div class="label">Last backtest</div>
+                    <div class="value" style="font-size:0.8rem">${esc((s.last_backtest_at || '—').slice(0, 10))}</div></div>
+            </div>
+
+            ${notBacktested ? `<div class="warn">No backtest in the last ${s.activity_window_days} days, so the signal and trade counts above are empty by age, not by behaviour.</div>` : ''}
+            ${noSignals ? `<div class="warn">${s.recent_runs} run(s) in the last ${s.activity_window_days} days produced no signals at all — the strategy is not firing, so its metrics are empty rather than bad.</div>` : ''}
+            ${deadSignals ? `<div class="warn">${s.signals} signal(s) generated, none traded — every signal was rejected by validation.</div>` : ''}
+            ${capped ? `<div class="warn">params carry max_price ${esc(String(capped))}: symbols priced above it are skipped regardless of signal.</div>` : ''}
+
+            <details class="params"><summary>Parameters</summary>
+                ${Object.entries(s.params || {}).map(([k, v]) =>
+                    `<span class="param">${esc(k)}: <b>${esc(Array.isArray(v) ? v.join(', ') : v)}</b></span>`).join('') || '<span class="param">none recorded</span>'}
+            </details>
+
+            ${s.review_notes ? `<div class="notes">${esc(s.review_notes)}</div>` : ''}
+
+            <div class="actions">
+                ${(s.available_transitions || []).map(target => {
+                    const move = moveFor(s.status, target);
+                    return `<button class="${move}" onclick="changeStatus('${esc(s.name)}','${esc(target)}','${move}')">${LABEL[move]}</button>`;
+                }).join('')}
+                <button class="history-btn" onclick="toggleHistory('${esc(s.name)}')">Backtest history</button>
+                <span class="result" id="r-${esc(s.name)}"></span>
+            </div>
+            <div id="h-${esc(s.name)}"></div>
+        </div>`;
+    }
+
+    async function changeStatus(name, target, move) {
+        const note = prompt(`${LABEL[move]} — ${name}\n\nWhy? (recorded against the strategy, required)`);
+        if (note === null) return;                    // cancelled
+        const out = document.getElementById('r-' + name);
+        out.textContent = 'working…'; out.style.color = '#75715e';
+        try {
+            const response = await fetch(`/api/roster/${encodeURIComponent(name)}/status`, {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({target, note}),
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+            out.textContent = `${data.transition}: ${data.from} → ${data.to}`;
+            out.style.color = '#a6e22e';
+            loadRoster();
+        } catch (e) {
+            out.textContent = e.message;
+            out.style.color = '#f92672';
+        }
+    }
+
+    async function toggleHistory(name) {
+        const host = document.getElementById('h-' + name);
+        if (host.innerHTML) { host.innerHTML = ''; return; }
+        host.innerHTML = '<div class="empty">Loading…</div>';
+        try {
+            const response = await fetch(`/api/roster/${encodeURIComponent(name)}/backtests`);
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+            const runs = data.runs || [];
+            host.innerHTML = runs.length === 0
+                ? '<div class="empty">No backtest runs recorded.</div>'
+                : `<table>
+                    <thead><tr><th>Symbol</th><th>Date</th><th>Interval</th>
+                      <th>Signals</th><th>Trades</th><th>Return</th><th>Win</th><th>Sharpe</th></tr></thead>
+                    <tbody>${runs.map(r => `<tr>
+                      <td>${tickerLink(r.symbol)}</td>
+                      <td>${esc(r.trading_date || '—')}</td>
+                      <td>${esc(r.interval || '—')}</td>
+                      <td>${r.signals_count}</td>
+                      <td>${r.total_trades}</td>
+                      <td class="${sign(r.total_return)}">${pct(r.total_return)}</td>
+                      <td>${pct(r.win_rate)}</td>
+                      <td class="${sign(r.sharpe_ratio)}">${num(r.sharpe_ratio)}</td>
+                    </tr>`).join('')}</tbody></table>`;
+        } catch (e) {
+            host.innerHTML = `<div class="warn">History unavailable: ${esc(e.message)}</div>`;
+        }
+    }
+
+    loadRoster();
+    setInterval(loadRoster, 60000);
+</script>
+</body>
+</html>
