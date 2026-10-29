@@ -14,7 +14,8 @@ from falcon_core.http import http_get
 
 from falcon_trader import auth, portfolio
 from falcon_trader.market_movers import build_movers
-from falcon_trader import recommendation_gate, risk_control, symbol_links
+from falcon_trader import (recommendation_gate, risk_control,
+                           strategy_roster_api, symbol_links)
 from falcon_trader.orchestrator.utils.timezone import now_et
 
 # Optional YouTube strategy support
@@ -130,6 +131,11 @@ app.register_blueprint(risk_control.create_blueprint(
 # later carries links without anyone opting in. The plain value is untouched:
 # the risk panel keys rows by it and the order ticket posts it back.
 symbol_links.install(app)
+
+# The Strategy Manager: the roster and its lifecycle. The card on the landing
+# page used to link to /api/strategy, which returns the deployed strategy's
+# source code as JSON, and the page it implied was never built.
+app.register_blueprint(strategy_roster_api.create_blueprint(get_db=lambda: db))
 
 # --- DB-persisted runtime config (editable from the website via /api/config) ---
 def _config_init():
@@ -1388,6 +1394,13 @@ def serve_diagnostics():
     return send_file('www/diagnostics.html')
 
 
+@app.route('/strategy-manager')
+@app.route('/strategy-manager.html')
+def serve_strategy_manager_page():
+    """The Strategy Manager: roster, metrics and lifecycle controls."""
+    return send_file('www/strategy-manager.html')
+
+
 @app.route('/strategy-view.html')
 def serve_strategy_view_page():
     """Serve the strategy detail view page"""
@@ -1721,52 +1734,22 @@ def activate_youtube_strategy(youtube_strategy_id):
 
 @app.route('/api/strategies/active', methods=['GET'])
 def get_active_strategies():
-    """List all active strategies with current performance"""
+    """Strategies currently paper trading, from the roster.
+
+    This read an `active_strategies` table that has never existed in this
+    database, inside a try/except that turned the failure into an empty list --
+    so it answered "no active strategies" while the roster held nine, one of
+    them paper trading. It also built StrategyAnalytics(DB_PATH), a SQLite
+    path, on a PostgreSQL deployment (falcon-trader#53).
+
+    "Active" means paper_trading here: the roster's own term for a strategy
+    that is running rather than being measured. /api/roster returns all of
+    them with their metrics.
+    """
     try:
-        try:
-            from falcon_trader.strategy_analytics import StrategyAnalytics
-            analytics = StrategyAnalytics(DB_PATH)
-            leaderboard = analytics.get_all_strategies_leaderboard()
-        except (ImportError, ConnectionError) as e:
-            return jsonify({"error": "analytics unavailable", "details": str(e)}), 503
-
-        # Also get all strategies (not just those with performance data).
-        # The active_strategies table is created lazily on first activation; if
-        # it doesn't exist yet there simply are no active strategies.
-        try:
-            rows = db.execute('''
-                SELECT id, strategy_name, status, allocation_pct,
-                       performance_weight, created_at, activated_at
-                FROM active_strategies
-                WHERE status IN ('active', 'paused')
-                ORDER BY activated_at DESC
-            ''', fetch='all') or []
-        except Exception:
-            rows = []
-
-        strategies = []
-        for row in rows:
-            strategy_id = row['id']
-
-            # Find performance data from leaderboard
-            perf_data = next((s for s in leaderboard if s['strategy_id'] == strategy_id), None)
-
-            strategies.append({
-                "strategy_id": strategy_id,
-                "strategy_name": row['strategy_name'],
-                "status": row['status'],
-                "allocation_pct": float(row['allocation_pct']) if row['allocation_pct'] else 0,
-                "performance_weight": float(row['performance_weight']) if row['performance_weight'] else 0,
-                "created_at": str(row['created_at']) if row['created_at'] else None,
-                "activated_at": str(row['activated_at']) if row['activated_at'] else None,
-                "performance": perf_data['performance'] if perf_data else {}
-            })
-
-        return jsonify({
-            "status": "success",
-            "strategies": strategies
-        })
-
+        strategies = [s for s in strategy_roster_api.roster(db)
+                      if s['status'] == strategy_roster_api.PAPER]
+        return jsonify({"status": "success", "strategies": strategies})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -1796,46 +1779,41 @@ def get_strategy_performance(strategy_id):
 
 @app.route('/api/strategies/<int:strategy_id>/pause', methods=['POST'])
 def pause_strategy(strategy_id):
-    """Pause a strategy (stop generating signals)"""
-    try:
-        rowcount = db.execute('''
-            UPDATE active_strategies
-            SET status = 'paused', deactivated_at = %s
-            WHERE id = %s AND status = 'active'
-        ''', (datetime.now().isoformat(), strategy_id))
+    """Stop a strategy paper trading, leaving it in backtest.
 
-        if rowcount == 0:
-            return jsonify({"error": "Strategy not found or already paused"}), 404
-
-        return jsonify({
-            "status": "success",
-            "message": f"Strategy {strategy_id} paused"
-        })
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    This wrote `UPDATE active_strategies SET status = 'paused'` against a table
+    that has never existed in this database, so it reported success for rows it
+    never touched. The roster has no paused state; the equivalent is a demotion
+    out of paper_trading, which is what this does now, keyed on the roster id
+    (falcon-trader#53).
+    """
+    return _roster_transition_by_id(
+        strategy_id, strategy_roster_api.BACKTEST,
+        "paused via /api/strategies/<id>/pause")
 
 
 @app.route('/api/strategies/<int:strategy_id>/resume', methods=['POST'])
 def resume_strategy(strategy_id):
-    """Resume a paused strategy"""
+    """Put a strategy back into paper trading. See pause_strategy."""
+    return _roster_transition_by_id(
+        strategy_id, strategy_roster_api.PAPER,
+        "resumed via /api/strategies/<id>/resume")
+
+
+def _roster_transition_by_id(strategy_id, target, note):
+    """Shared body for the two id-keyed lifecycle endpoints."""
+    row = db.execute(
+        "SELECT strategy_name FROM strategy_roster WHERE id = %s",
+        (strategy_id,), fetch='one')
+    if not row:
+        return jsonify({"status": "error",
+                        "error": f"no strategy with id {strategy_id}"}), 404
     try:
-        rowcount = db.execute('''
-            UPDATE active_strategies
-            SET status = 'active', activated_at = %s
-            WHERE id = %s AND status = 'paused'
-        ''', (datetime.now().isoformat(), strategy_id))
-
-        if rowcount == 0:
-            return jsonify({"error": "Strategy not found or not paused"}), 404
-
-        return jsonify({
-            "status": "success",
-            "message": f"Strategy {strategy_id} resumed"
-        })
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        result = strategy_roster_api.apply_transition(
+            db, row['strategy_name'], target, note)
+    except strategy_roster_api.TransitionError as exc:
+        return jsonify({"status": "error", "error": str(exc)}), 409
+    return jsonify({"status": "success", **result})
 
 
 @app.route('/api/strategies/<int:strategy_id>/signals', methods=['GET'])
